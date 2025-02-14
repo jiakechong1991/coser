@@ -1,0 +1,6 @@
+openai
+jsonlines
+regex
+requests
+langchain
+langchain_community
