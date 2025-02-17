@@ -1,4 +1,3 @@
-
 import re 
 from typing import List, Tuple
 from collections import Counter
@@ -7,7 +6,24 @@ import jsonlines
 from utils import cached
 import traceback
 import os
-# read 'books_data.jsonl'
+from tqdm import tqdm
+
+import argparse
+
+def parse_args():
+    parser = argparse.ArgumentParser(description='Construct CoSER-style dataset from source books')
+    parser.add_argument('--input', type=str, required=True,
+                      help='Input jsonl file path containing books data')
+    parser.add_argument('--output_dir', type=str, default='data/curated/',
+                      help='Output directory path (default: data/curated/)')
+    parser.add_argument('--num_workers', type=int, default=1,
+                      help='Number of parallel workers (default: 1)')
+    args = parser.parse_args()
+    
+    # Create output directory if it doesn't exist
+    os.makedirs(args.output_dir, exist_ok=True)
+    
+    return args
 
 
 @cached
@@ -898,11 +914,11 @@ Please provide the output in the following JSON format:
 {json.dumps(truncated_plots, ensure_ascii=False, indent=2) if truncated_plots else "None"}
 """
     
-#     E.g. "[My father’s words fill me with awe, but I still feel uneasy.] 
+#     E.g. "[My father's words fill me with awe, but I still feel uneasy.] 
 # (Nods seriously, but with a slight frown remaining) 
 # I understand, Father. Responsibility is important. But… is killing really necessary? 
 # (A flash of compassion in his eyes)
-# If someone has done something wrong, can’t we give them a chance to make amends?"
+# If someone has done something wrong, can't we give them a chance to make amends?"
 
     logger.info(prompt)
 
@@ -983,52 +999,55 @@ Please provide the output in the following JSON format:
     return response
 
 if __name__ == '__main__':
+    args = parse_args()
 
-    with jsonlines.open('books_data_nonfiction_full.jsonl', mode='r') as reader:
+    # Create output directory if it doesn't exist
+    os.makedirs(args.output_dir, exist_ok=True)
+
+    # Read input data
+    with jsonlines.open(args.input, mode='r') as reader:
         books_data = list(reader)
 
+    # Clean book titles
     for book in books_data:
         book['title'] = book['title'].replace('/', '-').replace('.', ' ')
 
+    logger.info(f"Processing {len(books_data)} books")
 
-    print(len(books_data))
+    def process_book_wrapper(book):
+        try:
+            process_book(book)
+            #fetch_from_cache(book)
+            result = postprocess_book(book)
+            logger.info(f"Successfully processed book: {book.get('title', 'Unknown')}")
+            return result
+        except Exception as e:
+            logger.error(f"Error processing book {book.get('title', 'Unknown')}: {str(e)}")
+            logger.error(traceback.format_exc())
+            return None
 
-    if 0:
-        from concurrent.futures import ProcessPoolExecutor, ThreadPoolExecutor
-        import multiprocessing
+    if args.num_workers > 1:
+        from concurrent.futures import ProcessPoolExecutor
+        
 
-        def process_book_wrapper(book):
-            try:
-                return process_book(book)
-                #fetch_from_cache(book)
-                #return postprocess_book(book)
-            except Exception as e:
-                logger.error(f"Error processing book {book.get('title', 'Unknown')}: {str(e)}")
-                logger.error(traceback.format_exc())
-                
-                return None
-
-        # Determine the number of CPU cores to use
-        num_cores = multiprocessing.cpu_count()
-        # Use 75% of available cores, but at least 1
-        num_workers = 5 
-
-        logger.info(f"Starting parallel processing with {num_workers} workers")
+        logger.info(f"Starting parallel processing with {args.num_workers} workers")
 
         # Process books in parallel
-        with ProcessPoolExecutor(max_workers=num_workers) as executor:
-            processed_books = list(executor.map(process_book_wrapper, books_data))
-
-        # Remove any None values (failed processing attempts)
-        processed_books = [book for book in processed_books if book is not None]
-
+        with ProcessPoolExecutor(max_workers=args.num_workers) as executor:
+            processed_books = list(tqdm(
+                executor.map(process_book_wrapper, books_data),
+                total=len(books_data),
+                desc="Processing books"
+            ))
     else:
+        processed_books = []
+        for book in tqdm(books_data):
+            processed_book = process_book_wrapper(book)
+            processed_books.append(processed_book)
 
-        for i, book in enumerate(books_data):
-
-            processed_book = process_book(book)
-
-            print(f"Processed {i+1}/{len(books_data)} books")
+    # Filter out failed processes
+    successful_books = [book for book in processed_books if book is not None]
+    logger.info(f"Successfully processed {len(successful_books)}/{len(books_data)} books")
 
 
 
