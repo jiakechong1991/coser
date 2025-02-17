@@ -18,9 +18,9 @@ Setup your api_key and base_url for LLMs, in config.json.
 
 The complete dataset is currently undergoing internal review for safety concerns. We have provided some example data from *The Harry Potter series* and *A Song of Ice and Fire series* in the example_data/ directory.
 
-## Constructing Your Own Datasets
+### Constructing Your Own Datasets
 
-### Prepare the Source Content of Interested Books (or Other Fictional Works)
+#### Prepare the Source Content of Interested Books (or Other Fictional Works)
 
 To get started, you'll need to prepare a JSONL file containing the books you're interested in. Each line should contain a JSON object with the following structure:
 
@@ -37,7 +37,7 @@ Each JSON object should include three fields:
 
 Alternatively, you can use our provided dataset [CoSER-Books-Gutenberg](https://huggingface.co/datasets/Neph0s/CoSER-Books-Gutenberg). This dataset is a subset of books used in the CoSER project. It contains 81 carefully selected classic books from Project Gutenberg. All books in this collection are in the public domain and freely accessible.
 
-### Run the Construction Code
+#### Run the Construction Code
 
 To construct a CoSER-style dataset from your own books, run:
 
