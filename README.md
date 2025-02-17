@@ -25,9 +25,9 @@ The complete dataset is currently undergoing internal review for safety concerns
 To get started, you'll need to prepare a JSONL file containing the books you're interested in. Each line should contain a JSON object with the following structure:
 
 ```json
-{"title":"Pride and Prejudice", "author": "Jane Austen", "content": ...}
-{"title":"The Picture of Dorian Gray", "author": "Oscar Wilde", "content": ...}
-{"title":"Emily Bronte", "author": "Wuthering Heights", "content": ...}
+{"title":"Pride and Prejudice", "author": "Jane Austen", "content": "..."}
+{"title":"The Picture of Dorian Gray", "author": "Oscar Wilde", "content": "..."}
+{"title":"Emily Bronte", "author": "Wuthering Heights", "content": "..."}
 ```
 
 Each JSON object should include three fields:
