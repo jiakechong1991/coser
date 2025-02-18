@@ -11,6 +11,7 @@ import requests
 import io
 import pickle
 import random
+import tiktoken
 import __main__
 from typing import Dict, List
 
@@ -18,12 +19,14 @@ USER = "<USER>"
 
 count_error = 0
 
+streaming = False
+
 def setup_logger(name, log_file, level=logging.INFO, quiet=False):
 	logger = logging.getLogger(name)
 	logger.setLevel(level)
 
 	file_handler = logging.FileHandler(log_file, encoding='utf-8')
-	file_handler.setLevel(level)
+	file_handler.setLevel(logging.DEBUG)
 	file_formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
 	file_handler.setFormatter(file_formatter)
 	logger.addHandler(file_handler)
@@ -40,7 +43,7 @@ def setup_logger(name, log_file, level=logging.INFO, quiet=False):
 from contextlib import contextmanager
 import tempfile
 @contextmanager
-def _tempfile(*args, **kws):
+def _tempfile(dir=None,*args, **kws):
 	""" Context for temporary file.
 	Will find a free temporary filename upon entering
 	and will try to delete the file on leaving
@@ -48,9 +51,13 @@ def _tempfile(*args, **kws):
 	----------
 	suffix : string
 		optional file suffix
+	dir : string
+		directory to create temp file in, will be created if doesn't exist
 	"""
-
-	fd, name = tempfile.mkstemp(*args, **kws)
+	if dir is not None:
+		os.makedirs(dir, exist_ok=True)
+		
+	fd, name = tempfile.mkstemp(dir=dir, *args, **kws)
 	os.close(fd)
 	try:
 		yield name
@@ -104,14 +111,14 @@ def safe_pickle_dump(obj, fname):
 	with open_atomic(fname, 'wb') as f:
 		pickle.dump(obj, f, -1) # -1 specifies highest binary protocol
 
-logger = setup_logger(__name__ + '_main', f'{__file__}.log', level=logging.INFO, quiet=False)
+logger = setup_logger(__name__, f'{__file__.split(".")[0]}.log', level=logging.INFO, quiet=False)
 
 with open('config.json', 'r') as f:
 	config = json.load(f)
 
 ERROR_SIGN = '[ERROR]'
 
-cache_path = 'cache.pkl'
+cache_path = '.cache.pkl'
 cache_sign = True
 cache = None
 reload_cache = False
@@ -124,8 +131,8 @@ def set_cache_path(new_cache_path):
 
 def cached(func):
 	def wrapper(*args, **kwargs):		
-		# process_book_chunk 
-		if func.__name__ == 'process_book_chunk':
+		# extract_from_chunk 
+		if func.__name__ == 'extract_from_chunk':
 			key = ( func.__name__, args[0]['title'], args[1]) 
 		else:
 			key = ( func.__name__, str(args), str(kwargs.items())) 
@@ -164,6 +171,15 @@ def cached(func):
 
 	return wrapper
 
+enc = tiktoken.get_encoding("cl100k_base")  # Claude uses cl100k_base encoding
+
+def encode(text):
+	return enc.encode(text)
+
+def decode(tokens):
+	return enc.decode(tokens)
+
+NEWLINE = enc.encode('\n')[0]
 
 def num_tokens_from_string(string: str, encoding_name: str = "cl100k_base") -> int:
 	import tiktoken
@@ -180,16 +196,15 @@ def get_response(model, messages, nth_generation=0, **kwargs):
 
 	try:
 
-		if True:
-			# close-sourced models
-			import openai 
-			client = openai.OpenAI(api_key=config['api_key'], base_url=config['base_url'], timeout=180)
+		import openai 
+		client = openai.OpenAI(api_key=config['api_key'], base_url=config['base_url'], timeout=180)
 
-			if model.startswith('claude'):
-				max_tokens = 8192
-			else:
-				max_tokens = 16384
+		if model.startswith('claude'):
+			max_tokens = 8192
+		else:
+			max_tokens = 16384
 
+		if streaming: 
 			stream = client.chat.completions.create(
 				model=model,
 				messages=messages,
@@ -210,6 +225,15 @@ def get_response(model, messages, nth_generation=0, **kwargs):
 
 					if len(chunk.choices) == 0 and response.strip()[-1] == '}':
 						break 
+		else:
+			completion = client.chat.completions.create(
+				model=model,
+				messages=messages,
+				max_tokens=max_tokens,
+				temperature=0 if nth_generation == 0 else 1,
+				timeout=180
+			)
+			response = completion.choices[0].message.content
 		
 		return response
 	# print error info
@@ -538,7 +562,7 @@ Output only the corrected JSON string, without any additional explanations or co
 			count_error += 1
 			return None
 
-	# an inserted workflow for post processing in fetch_from_cache
+	# an inserted workflow for post processing in restore_from_cache
 	if kwargs.get('post_fix_truncated_json_', False):
 		text = _fix_json_truncated(text)
 
