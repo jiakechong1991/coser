@@ -406,7 +406,7 @@ def evaluate_self_play_conversations(test_dataset_path, actor_model, actor_retri
             
         
             
-            res[dimension]['score'] = max(0, 100 - (sum([f['severity'] for f in res[dimension]['flaws'] if isinstance(f['severity'], int)]) - 0.3 * actor_rounds) * 5)
+            res[dimension]['score'] = max(0, min(100 - (sum([f['severity'] for f in res[dimension]['flaws'] if isinstance(f['severity'], int)]) - 0.3 * actor_rounds) * 5, 100) )
 
 
         eval_result['score'] = sum([eval_result[dimension]['score'] for dimension in dimensions]) / len(dimensions)

@@ -1242,6 +1242,9 @@ Now, please generate the character profile, starting with ===Profile===.
     # Save final results
     results['character_datasets'] = character_datasets
     results['split_plot_index'] = split_index
+
+    results.pop("chapter_beginnings")
+    results.pop("fail_to_parse_responses")
     
     with open(save_path, 'w', encoding='utf-8') as f:
         json.dump(results, f, ensure_ascii=False, indent=2)
@@ -1292,10 +1295,6 @@ if __name__ == '__main__':
         for book in tqdm(books_data):
             processed_book = process_book(book)
             processed_books.append(processed_book)
-
-    # Filter out failed processes
-    successful_books = [book for book in processed_books if book is not None]
-    logger.info(f"Successfully processed {len(successful_books)}/{len(books_data)} books")
 
 
 
