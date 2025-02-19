@@ -37,19 +37,36 @@ Each JSON object should include three fields:
 
 Alternatively, you can use our provided dataset [CoSER-Books-Gutenberg](https://huggingface.co/datasets/Neph0s/CoSER-Books-Gutenberg). This dataset is a subset of books used in the CoSER project. It contains 81 carefully selected classic books from Project Gutenberg. All books in this collection are in the public domain and freely accessible.
 
-#### Run the Construction Code
+#### Curate Data for Each Book
 
 To construct a CoSER-style dataset from your own books, run:
 
 ```bash
-python data_construction/process.py --input data/src/books_example.jsonl --output_dir data/curated/ --num_workers 5
+python data_construction/main.py --input data books_example.jsonl --num_workers 5
 ```
 
-### Arguments
+**Arguments**
 - `--input`: Path to your input JSONL file containing the books data 
-- `--output_dir`: Directory where the curated data will be saved (default: "data/curated/")
+- `--output_dir`: Directory where the curated data will be saved (default: "data"). The final data for each book will be stored in data/final/ .
 - `--num_workers`: Number of parallel workers for data processing (default: 1)
+- `--model`: The LLM model to use for data construction (defaults to gpt-4o, though we employed claude-3-5-sonnet-20240620 when constructing CoSER dataset.)
 
+**Note**: It is common to encounter parsing errors and other issues due to the inherent instability of LLMs when generating structured data. Our code includes comprehensive error handling and retry mechanisms to handle these cases gracefully. You can check the logs in `data_construction/main.log` for details about any errors and how they were processed.
+
+#### Convert the Book Data into Training Samples & Test Set 
+
+This step transforms the curated book data into: 1) training samples in sharegpt format, and 2) a test set. These data are used for given-circumstance acting evaluation (GCA) training and evaluation. 
+
+```bash
+python data_construction/convert_data_format.py 
+```
+
+**Arguments**
+- `--dir`: Set as the output_dir in the previous step (default: data).
+
+The script will generate:
+- Training data: `data/train/sft_sharegpt.json`
+- Test set: `data/test/test_set.json`
 
 ### Evaluation via GCA (Given-Circumtance Acting)
 

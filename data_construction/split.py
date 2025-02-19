@@ -5,7 +5,6 @@ from collections import Counter
 import json
 import jsonlines
 from utils import cached
-# read 'books_data.jsonl'
 
 count_split_success = 0
 count_split_failed = 0
@@ -112,11 +111,10 @@ def split_book(book: dict) -> dict:
     
     
 if __name__ == '__main__':
-    # read 'books_data.jsonl'
-    with jsonlines.open('books_data_nonfiction_gutenberg.jsonl', mode='r') as reader:
-        books_data = list(reader) #[:100]
 
-    import pdb; pdb.set_trace()
+    with jsonlines.open('data/src/books_example.jsonl', mode='r') as reader:
+        books_data = list(reader) 
+
     # Process all books
     split_books = [split_book(book) for book in books_data]
 

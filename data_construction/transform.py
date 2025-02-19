@@ -1,5 +1,5 @@
-# transforming data from results/final/... to the chat format
-# such as : 
+# Transforming extracted book data to the training format and the test set
+# The training data follows the sharegpt format for sft, such as : 
 # [
 #   [
 #     {
@@ -15,88 +15,134 @@
 
 import os
 import random
+import argparse
+from utils import remove_inner_thoughts
+import json
+import re
+import copy
 
+parser = argparse.ArgumentParser(description='Convert data format')
+parser.add_argument('--dir', type=str, default='data', help='input_dir path for both input and output')
+args = parser.parse_args()
 
-directory = 'results/full/'
+input_dir = args.dir + '/final/'
 
-# Get a list of all files in the directory
-files = [f for f in os.listdir(directory) if os.path.isfile(os.path.join(directory, f))]
+# Get a list of all files in the input_dir
+files = [f for f in os.listdir(input_dir) if os.path.isfile(os.path.join(input_dir, f))]
 
 def stable_shuffle(files):
-    # Python's hash() is randomized per process for security
-    # To get consistent results, we'll use a simple string hash function
+    """
+    Performs a deterministic shuffle of file names using a custom hash function.
+    
+    This function provides consistent ordering of files across different runs,
+    unlike Python's built-in hash() which is randomized per process.
+    
+    Args:
+        files: List of filenames (strings) to be shuffled
+        
+    Returns:
+        List of filenames in a deterministically shuffled order
+        
+    Note:
+        Uses a simple polynomial rolling hash function (similar to Java's String.hashCode())
+        with a multiplier of 31 to generate consistent hash values.
+    """
     def string_hash(s):
+        """
+        Computes a deterministic 32-bit hash value for a string.
+        
+        Args:
+            s: Input string to hash
+            
+        Returns:
+            32-bit integer hash value
+        """
         h = 0
+        # Multiply by 31 at each step to distribute bits well
+        # Use bitwise AND with 0xFFFFFFFF to keep within 32 bits
         for c in s:
             h = (31 * h + ord(c)) & 0xFFFFFFFF
         return h
     
-    # Use our deterministic hash function instead of built-in hash()
-    files_with_hash = [(f, string_hash(f)) for f in files]
+    # Generate (filename, hash) pairs for stable sorting
+    files_with_hash = [(filename, string_hash(filename)) 
+                       for filename in files]
     
-    # Sort based on hash values
+    # Sort files based on their hash values for deterministic ordering
     files_with_hash.sort(key=lambda x: x[1])
     
-    # Return just the filenames
-    return [f[0] for f in files_with_hash]
+    # Extract and return just the filenames in their new order
+    return [file_hash_pair[0] for file_hash_pair in files_with_hash]
 
 # Shuffle the files in a stable way
 files = stable_shuffle(files)
 
-assert(files[:10] == ['The Amulet of Samarkand (Bartimaeus, #1).json', 'Choke.json', 'The Outsiders.json', 'The Witches.json', 'A Short History of Nearly Everything.json', 'Spirit Bound (Vampire Academy, #5).json', 'Alanna: The First Adventure (Song of the Lioness, #1).json', 'Lover Awakened (Black Dagger Brotherhood, #3).json', 'Twelfth Night.json', 'Boy of Chaotic Making (Whimbrel House, #3).json'])
-print(files[:10])
-
-
-count_remove = 0 
-
-import argparse
-from utils import remove_inner_thoughts
-
-# Set up argument parser
-parser = argparse.ArgumentParser(description='Transform book data to chat format')
-args = parser.parse_args()
+# Print first 10 files and their total count
+print(f"First 10 files: {files[:10]}")
+print(f"Total number of files: {len(files)}")
 
 dedup = False
 
 ENVIRONMENT = 'Environment'
 NSP = 'NSP'
 
-import json
-import re
+def process(file):
+    """
+    This function process a book's extracted data file. Most importantly, it converts the data into GCA training data, which follow the sharegpt format for sft.  
 
-def transform_to_chat_data(file):
-    with open(os.path.join(directory, file), 'r', encoding='utf-8') as f:
+    This function processes a JSON file containing book data and converts it into a format suitable
+    for training LLMs. It handles:
+    - Preparing Characters' System Prompts
+    - Multiple processing modes (with/without inner thoughts, with/without other character profiles)
+    - Next speaker prediction data generation
+    - Weighting plots based on character frequency
+    
+    Args:
+        file (str): Name of the JSON file containing extracted book data
+
+    Returns:
+        tuple: Contains:
+            - train_chat_data (list): Chat-formatted training data
+            - held_out_plots (list): The plots held-out for testing purposes, from which we sample test samples
+            - character_profiles (dict): Character profile information
+    """
+    # Load and parse the input file
+    with open(os.path.join(input_dir, file), 'r', encoding='utf-8') as f:
         data = json.load(f)
     
     book_name = os.path.splitext(file)[0]
 
+    # Extract character information
     character_datasets = data['character_datasets']
-    character_profiles = {name: data['character_datasets'][name]['profile'] for name in character_datasets.keys()}
+    character_profiles = {name: data['character_datasets'][name]['profile'] 
+                         for name in character_datasets.keys()}
 
     import math 
 
-    character_weight = {name: max(1, math.sqrt(len(data['character_datasets'][name]['plots']))) for name in character_datasets.keys()}
+    # Calculate character weights based on number of plot appearances
+    character_weight = {name: max(1, math.sqrt(len(data['character_datasets'][name]['plots']))) 
+                       for name in character_datasets.keys()}
 
     characters = character_datasets.keys()
     
     train_chat_data = []
-    test_chat_data = []
     
     n_plots = len(data['plots'])
 
+    # Default split is 90% train, 10% test unless specified in data
     split_index = data.get('split_plot_index', int(n_plots * 0.9))
 
-    count_random_next_actor = 0
-    count_next_actor = 0
-
+    # Possible keys for message content
     message_keys = ['message', 'thought', 'description']
 
-    for thoughtless in [True, False]:
-        for with_other_character_profiles in [True, False]:
+    # Process data in different modes for variety
+    for thoughtless in [True, False]:  # With/without inner thoughts
+        for with_other_character_profiles in [True, False]:  # With/without other character contexts
             for i_p, plot in enumerate(data['plots']):
-                plot.pop('text', None)
+                # Clean up plot data
+                # plot.pop('text', None)
 
-                # check plot['key_characters']
+                # Standardize key_characters format
                 plot_key_characters = [] 
                 for c in plot['key_characters']:
                     if 'name' in c:
@@ -107,16 +153,21 @@ def transform_to_chat_data(file):
                 
                 plot['key_characters'] = plot_key_characters
 
+                # Process each conversation in the plot
                 for i_c, conversation in enumerate(plot['conversation']):
                     from collections import Counter
-                    # Step 1: Count the number of each character's utterance
-                    utterance_counts = Counter(utterance['character'] for utterance in conversation['dialogues'])
+                    # Count utterances per character
+                    utterance_counts = Counter(utterance['character'] 
+                                            for utterance in conversation['dialogues'])
         
-                    speaking_characters_w_env = sorted(utterance_counts, key=lambda x: utterance_counts[x], reverse=True) # 包括Environment
+                    # Sort characters by frequency of speech
+                    speaking_characters_w_env = sorted(utterance_counts, 
+                                                     key=lambda x: utterance_counts[x], 
+                                                     reverse=True)
 
-                    plot_characters = [ c['name'] for c in plot['key_characters']] 
+                    plot_characters = [c['name'] for c in plot['key_characters']]
 
-                    # check conversation['key_characters']
+                    # Standardize conversation character format
                     conversation_key_characters = []
                     for c in conversation['key_characters']:
                         if 'name' in c:
@@ -127,9 +178,8 @@ def transform_to_chat_data(file):
                     
                     conversation['key_characters'] = conversation_key_characters
 
-                    # check conversation['dialogues']
+                    # Validate and standardize dialogue format
                     broken_sign = False
-
                     for i_u, utterance in enumerate(conversation['dialogues']):
                         if not 'message' in utterance:
                             if 'thought' in utterance:
@@ -137,7 +187,7 @@ def transform_to_chat_data(file):
                             elif 'description' in utterance:
                                 utterance['message'] = utterance.pop('description')
                             else:
-                                # 看看utterance中有没有一个k, v 其中k以[开头 以]结尾
+                                # Check for bracketed messages
                                 message = None
                                 for k, v in utterance.items():
                                     if k.startswith('[') and k.endswith(']'):
@@ -148,7 +198,6 @@ def transform_to_chat_data(file):
                                     utterance.pop(k)
                                 else:
                                     broken_sign = True
-                                    import pdb; pdb.set_trace()
                                     break
                         
                         if not 'character' in utterance:
@@ -156,16 +205,16 @@ def transform_to_chat_data(file):
                                 utterance['character'] = utterance.pop('name')
                             else:
                                 broken_sign = True
-                                import pdb; pdb.set_trace()
                                 break
                     
                     if broken_sign:
                         continue
 
+                    # Skip conversations with no valid characters
                     if len([c for c in utterance_counts if c != ENVIRONMENT]) == 0:
-                        # no valid characters in this conversation
                         continue
 
+                    # Identify major characters (those with profiles)
                     major_characters = [c for c in speaking_characters_w_env if c in character_profiles]
                     
                     if 'major_characters' not in conversation:
@@ -175,15 +224,16 @@ def transform_to_chat_data(file):
                         assert conversation['speaking_characters_w_env'] == speaking_characters_w_env
                         assert conversation['major_characters'] == major_characters
 
+                    # Build scenario string
                     if random.random() < 0.5:
                         scenario_str = conversation['scenario'] + '\n' + plot['summary']    
                     else:
                         scenario_str = conversation['scenario']
 
+                    # Select characters for processing
                     if dedup:
-                        # Step 2: Select the character
+                        # Select single character, either most frequent or random
                         if random.random() < 0.5:
-                            # select the most frequent character
                             selected_character = speaking_characters_w_env[0]
                         else:
                             count = 0
@@ -197,7 +247,7 @@ def transform_to_chat_data(file):
                     else:
                         selected_characters = speaking_characters_w_env
 
-                    # first collect character_profiles in this conversation 
+                    # Collect character profiles for this conversation
                     tmp_character_profiles = {}
                     for character in speaking_characters_w_env:
                         if character == ENVIRONMENT:
@@ -208,66 +258,74 @@ def transform_to_chat_data(file):
                             character_profile = character_profiles[character]
                         
                         if character in plot_characters:
-                            character_info = [c for c in plot['key_characters'] if c.get('name', '') == character ][0]
+                            character_info = [c for c in plot['key_characters'] 
+                                           if c.get('name', '') == character][0]
 
                             if 'description' in character_info:
-                                character_profile = character_info.get('description', '').strip('\n') + '\n\n' + character_profile.strip('\n')
+                                character_profile = (character_info.get('description', '').strip('\n') 
+                                                  + '\n\n' + character_profile.strip('\n'))
                         
                         character_profile = character_profile.strip(' \n')
                         if character_profile != '':
                             tmp_character_profiles[character] = character_profile
 
+                    # Process each selected character
                     for character in selected_characters:
                         chat = []
                         
+                        # Generate appropriate system prompt
                         if character == ENVIRONMENT:
                             from utils import get_environment_prompt
-                            system_prompt = get_environment_prompt(major_characters=major_characters,  scenario=scenario_str)
+                            system_prompt = get_environment_prompt(
+                                major_characters=major_characters,  
+                                scenario=scenario_str
+                            )
                         else:
-                            # get the 'thought' 
-                            character_info = [char for char in conversation['key_characters'] if char.get('name', '') ]
+                            # Get character motivation
+                            character_info = [char for char in conversation['key_characters'] 
+                                           if char.get('name', '')]
 
                             if len(character_info) == 0: 
-                                thought = ""
+                                motivation = ""
                             else:
                                 try:
-                                    thought = character_info[0]['thought']
+                                    motivation = character_info[0]['motivation']
                                 except:
-                                    thought = character_info[0].get('description', '')
+                                    motivation = character_info[0].get('description', '')
 
-                                # drop out the thought at a chance of 0.5
+                                # 50% chance to drop the motivation
                                 if random.random() < 0.5:
-                                    thought = ""
+                                    motivation = ""
 
-                            # get the 'system_prompt'
+                            # Build character profile
                             character_profile = tmp_character_profiles.get(character, '')
 
                             if character in plot_characters:
-                                character_info = [c for c in plot['key_characters'] if c.get('name', '') == character ][0]
+                                character_info = [c for c in plot['key_characters'] 
+                                               if c.get('name', '') == character][0]
 
                                 if random.random() < 0.5:
-                                    character_profile += '\n\n' + character_info.get('summary', '')
+                                    character_profile += '\n\n' + character_info.get('experience', '')
                             
                             character_profile = character_profile.strip(' \n')
-
-                            #print(f'{character}: {character_profile}')
                             
                             from utils import get_character_prompt
-                            system_prompt = get_character_prompt(book_name, character, character_profile, plot, conversation, thought, thoughtless, other_character_profiles=tmp_character_profiles if with_other_character_profiles else None)
+                            system_prompt = get_character_prompt(
+                                book_name, character, character_profile, plot, conversation, 
+                                motivation, thoughtless, 
+                                other_character_profiles=tmp_character_profiles if with_other_character_profiles else None
+                            )
 
-                        
+                        # Build chat sequence
                         chat.append({"from": "system", "value": system_prompt})
-
-
-
                         chat.append({"from": "user", "value": "===Conversation Start===\n\n"})
                         
                         prev_role = 'human'
 
                         import re
 
+                        # Process each utterance
                         for i_u, utterance in enumerate(conversation['dialogues']):
-
                             message = utterance['message']
 
                             if utterance['character'] != character:
@@ -277,7 +335,8 @@ def transform_to_chat_data(file):
                                 if prev_role == 'human':
                                     chat[-1]['value'] += f"{utterance['character']}: {message}\n\n"
                                 else:
-                                    chat.append({"from": "user", "value": f"{utterance['character']}: {message}\n\n"})
+                                    chat.append({"from": "user", 
+                                               "value": f"{utterance['character']}: {message}\n\n"})
                                 prev_role = 'human'
                             else:
                                 if thoughtless:
@@ -285,19 +344,20 @@ def transform_to_chat_data(file):
                                         message = remove_inner_thoughts(message)
 
                                     if len(message.strip(' \n')) == 0:
-                                        # remove training data that may contain empty outputs
                                         continue
                                     
                                 if prev_role == 'character':
                                     chat[-1]['value'] += f"{message}\n\n"
                                 else:
-                                    chat.append({"from": "assistant", "value": f"{utterance['character']}: {message}\n\n"})
+                                    chat.append({"from": "assistant", 
+                                               "value": f"{utterance['character']}: {message}\n\n"})
                                 prev_role = 'character'
                         
+                        # Skip if no assistant messages
                         if len([m for m in chat if m['from'] == 'assistant']) == 0:
                             continue 
                             
-                
+                        # Package chat data
                         chat = {
                             "conversations": chat,
                             "details": {
@@ -308,18 +368,18 @@ def transform_to_chat_data(file):
                             }
                         }
                         
+                        # Add to appropriate dataset
                         if i_p < split_index:
-                            # split train/test data by plots. the first 80% of the plots are used for training, and the last 20% are used for testing.
-
                             train_chat_data.append(chat)
-                        else:
-                            if thoughtless == False and with_other_character_profiles == True:  
-                                test_chat_data.append(chat)
+                        
                     
-                    # add the next speaker prediction data
+                    # Generate next speaker prediction data
                     from utils import get_nsp_prompt
                     chat = []
-                    system_prompt = get_nsp_prompt(all_characters=speaking_characters_w_env, scenario=scenario_str)
+                    system_prompt = get_nsp_prompt(
+                        all_characters=speaking_characters_w_env, 
+                        scenario=scenario_str
+                    )
 
                     chat.append({"from": "system", "value": system_prompt})
                     chat.append({"from": "user", "value": "===Conversation Start===\n\n"})
@@ -327,17 +387,13 @@ def transform_to_chat_data(file):
                     for i_u, utterance in enumerate(conversation['dialogues']):
                         next_actor = utterance['character']
                                         
-                        # drop out the next actor in some random cases
+                        # Randomly mask some non-major characters
                         if next_actor not in major_characters + [ENVIRONMENT]:
                             if random.random() < 0.25:
                                 next_actor = "random"
                         elif next_actor not in speaking_characters_w_env:
-                            # almost impossible
                             next_actor = "random"
-                                        
-                        if next_actor == "random": count_random_next_actor += 1
-                        count_next_actor += 1
-
+                                    
                         chat.append({"from": "assistant", "value": next_actor})
 
                         message = None
@@ -349,9 +405,9 @@ def transform_to_chat_data(file):
                         if message is None:
                             break
 
-                        chat.append({"from": "user", "value": f"{utterance['character']}: {message}\n\n"})
+                        chat.append({"from": "user", 
+                                   "value": f"{utterance['character']}: {message}\n\n"})
                         
-                    
                     chat.append({"from": "assistant", "value": "<END CHAT>"})
 
                     chat = {"conversations": chat, "details": {
@@ -361,93 +417,69 @@ def transform_to_chat_data(file):
                         "character": NSP
                     }}
 
+                    # Add some NSP data to training set
                     if i_p < split_index and random.random() < 0.1:
                         train_chat_data.append(chat)
-
-
-
-    # plot-level dataset
+                        
+    # Prepare plot-level dataset
     for i_p, plot in enumerate(data['plots']):
         plot['i_p'] = i_p
 
     def avg(lst):
         return sum(lst) / len(lst)
 
-    test_plots = data['plots'][split_index:]
-    # calculate the weight of each plot as the sum of the weights of the key characters in this plot
-    for plot in test_plots:
+    held_out_plots = data['plots'][split_index:]
+    # Weight each plot based on its characters
+    for plot in held_out_plots:
         for conversation in plot['conversation']:
             try:
-                conversation['weight'] = avg([character_weight.get(c, 1) for c in conversation['speaking_characters_w_env'] if c != ENVIRONMENT])
+                conversation['weight'] = avg([
+                    character_weight.get(c, 1) 
+                    for c in conversation['speaking_characters_w_env'] 
+                    if c != ENVIRONMENT
+                ])
             except:
                 conversation['weight'] = 1
 
-    return train_chat_data, test_chat_data, test_plots, character_profiles
+    return train_chat_data, held_out_plots, character_profiles
 
-train_chat_data = []
-test_chat_data_id_books = {}
-test_chat_data_ood_books = {}
-test_chat_data_got = {}
 
 # Process each file
-n_b = len(files)
+n_books = len(files)
 
-test_plots_id_books = {}
-test_plots_ood_books = {}
-test_plots_got = {}
+train_chat_data = []
+held_out_plots_id_books = {}
+held_out_plots_ood_books = {}
 
 
 for i_b, file in enumerate(files):
     book_name = os.path.splitext(file)[0]
-    train_chat_data_book, test_chat_data_book, test_plots_book, character_profiles_book = transform_to_chat_data(file)
+    train_chat_data_book,  test_plots_book, character_profiles_book = process(file)
 
-
-    if i_b < n_b * 0.9 and not ('A Song of Ice and Fire' in book_name):
-        # The training set excludes the Got data 
+    if i_b < n_books * 0.9: #and not ('A Song of Ice and Fire' in book_name) : # The training set excludes the GOT data 
         train_chat_data += train_chat_data_book
-        test_chat_data_id_books[book_name] = test_chat_data_book
-        test_plots_id_books[book_name] = {
+
+        held_out_plots_id_books[book_name] = {
             "character_profiles": character_profiles_book,
             "plots": test_plots_book,
         }
     else:
-        if 'A Song of Ice and Fire' in book_name:
-            test_chat_data_got[book_name] = test_chat_data_book
-            test_plots_got[book_name] = {
-                "character_profiles": character_profiles_book,
-                "plots": test_plots_book,
-            }
-
-        test_chat_data_ood_books[book_name] = test_chat_data_book # train_chat_data_book + test_chat_data_book
-        test_plots_ood_books[book_name] = {
+        held_out_plots_ood_books[book_name] = {
             "character_profiles": character_profiles_book,
             "plots": test_plots_book,
         }
     
-
 # print key statistics of the datasets
-print(f"n_b: {n_b}")
-print(f"count_remove: {count_remove}")
+print(f"n_books: {n_books}")
 print(f"train_chat_data: {len(train_chat_data)}")
-print(f"test_chat_data_id_books: {len(test_chat_data_id_books)}")
-print(f"test_chat_data_ood_books: {len(test_chat_data_ood_books)}")
 
-assert(set(test_chat_data_ood_books.keys()) == set(['A Dance with Dragons (A Song of Ice and Fire, #5)', 'A Game of Thrones (A Song of Ice and Fire, #1)', 'A Clash of Kings  (A Song of Ice and Fire, #2)', 'A Feast for Crows (A Song of Ice and Fire, #4)', 'A Storm of Swords (A Song of Ice and Fire, #3)', 'A Discovery of Witches (All Souls, #1)', 'Tess of the D’Urbervilles', 'The Road', 'The Last Song', 'A Scanner Darkly', 'James and the Giant Peach', 'Before I Fall', 'The Forgotten Garden', 'The Son of Neptune (The Heroes of Olympus, #2)', 'Foundation (Foundation, #1)', 'The Summer I Turned Pretty (Summer, #1)', 'The Hunger Games (The Hunger Games, #1)', 'Frankenstein: The 1818 Text', 'Tuck Everlasting', 'Halfway to the Grave (Night Huntress, #1)', 'On the Beach', 'Leaves of Grass', 'The Girl with the Dragon Tattoo (Millennium, #1)', 'A Story of Yesterday', "I'll Give You the Sun", 'The Dark Tower (The Dark Tower, #7)', 'The Amber Spyglass (His Dark Materials, #3)', 'Percy Jackson and the Olympians (Percy Jackson and the Olympians, #1-3)', 'The Glass Menagerie', 'Little Women', 'The Name of the Rose', 'To the Lighthouse', 'Les Misérables', 'Anna Karenina', 'The Hunt for Red October (Jack Ryan, #3)', 'The V Girl: A Coming of Age Story', "The Pilgrim's Progress", "Always Remember: Ben's Story (Ravenswood, #3)", 'The Murder of Roger Ackroyd (Hercule Poirot, #4)', "To All the Boys I've Loved Before (To All the Boys I've Loved Before, #1)", 'The Woman in White', 'The Fiery Cross (Outlander, #5)', 'The Man in the High Castle', "At Grave's End (Night Huntress, #3)", 'Twenty Love Poems and a Song of Despair', 'The Girl on the Train', 'Fear and Loathing in Las Vegas', 'Where She Went (If I Stay, #2)', 'The Little Prince', 'Something Wicked This Way Comes', 'A Light in the Attic', 'The Secret History', 'Tales of H P  Lovecraft', 'Notes from Underground', 'Naked Lunch', 'Out of My Mind (The Out of My Mind Series)', 'Wuthering Heights', 'Pretties (Uglies, #2)', 'The Song of Achilles', 'The Tales of Beedle the Bard (Hogwarts Library, #3)', 'Seabiscuit: An American Legend', 'Dubliners', 'Dear John', 'Eleanor & Park', 'Jaws (Jaws, #1)', "The Restaurant at the End of the Universe (The Hitchhiker's Guide to the Galaxy, #2)", 'The Call of the Wild', 'Corelli’s Mandolin', 'Hard-Boiled Wonderland and the End of the World', 'The Complete Novels', 'The Taming of the Shrew', 'The Guernsey Literary and Potato Peel Pie Society', 'Tender Is the Night', 'Storm Front (The Dresden Files, #1)', 'Number the Stars', 'Cold Mountain', 'My Name Is Asher Lev', 'I, Robot (Robot, #0 1)', 'Water for Elephants', 'The Forgotten Palace', "A Dog's Purpose (A Dog's Purpose, #1)", 'The Girl Who Kicked the Hornet’s Nest (Millennium, #3)']))
 
 random.shuffle(train_chat_data)
 
-folder_path = 'rp' 
-if not folder_path:
-    folder_path = 'vanilla'
+os.makedirs(args.dir + '/train', exist_ok=True)
+os.makedirs(args.dir + '/test', exist_ok=True)
 
-folder_path = 'results/final/' + folder_path + '/'
-
-# mkdir if not exists
-os.makedirs(folder_path, exist_ok=True)
-
-
-# Save the chat data
-## sharegpt format
+# Save the chat data in the sharegpt format
 def to_sharegpt_format(chat_data):
     results = []
     role_map = {
@@ -465,63 +497,30 @@ def to_sharegpt_format(chat_data):
         results.append({"conversations": conversation})
     return results
 
-with open(folder_path + 'train_conversations_sharegpt.json', 'w', encoding='utf-8') as f:
+with open(args.dir + '/train/sft_sharegpt.json', 'w', encoding='utf-8') as f:
     sharegpt_format_data = to_sharegpt_format(train_chat_data)
     json.dump(sharegpt_format_data, f, ensure_ascii=False, indent=2)
 
-## step1 format
-def to_step1_format(chat_data):
-    results = []
-    role_map = {
-        'system': 'System',
-        'user': 'Human',
-        'assistant': 'Assistant',
-    }
-    for sample in chat_data:
-        conversation = []
-        for message in sample['conversations']:
-            conversation.append({
-                "from": role_map[message['from']],
-                "value": message['value']
-            })
-        results.append(conversation)
-    return results
 
-print(f'Saving into {folder_path}')
-
-with open(folder_path + 'train_conversations_step1.json', 'w', encoding='utf-8') as f:
-    step1_format_data = to_step1_format(train_chat_data)
-    json.dump(step1_format_data, f, ensure_ascii=False, indent=2)
-
-with open(folder_path + 'test_conversations_id_books.json', 'w', encoding='utf-8') as f:
-    json.dump(test_chat_data_id_books, f, ensure_ascii=False, indent=2)
-
-with open(folder_path + 'test_conversations_ood_books.json', 'w', encoding='utf-8') as f:
-    json.dump(test_chat_data_ood_books, f, ensure_ascii=False, indent=2)
-
-with open(folder_path + 'test_conversations_got.json', 'w', encoding='utf-8') as f:
-    json.dump(test_chat_data_got, f, ensure_ascii=False, indent=2)
-
-import copy
-def to_test_circumstance(test_plots, n_samples=100, output_path=None):
+def to_test_circumstance(test_plots, n_samples=100, tag=''):
     samples = []
     for book_name in test_plots.keys():
         for i, plot in enumerate(test_plots[book_name]['plots']):
             for j, conversation in enumerate(plot['conversation']):
-                weight = conversation.get('weight', 1.0)  # Default weight of 1.0 if not specified
+                weight = conversation.get('weight', 1.0) 
                 samples.append((book_name, i, j, weight))
     
     weights = [s[-1] for s in samples]
-    print('original average weight:', sum(weights) / len(weights))
+
+    if len(samples) < n_samples:
+        print(f'In to_test_circumstance, Warning: there are only {len(samples)} samples, which is less than the expected number {n_samples}')
+        n_samples = len(samples)
 
     # first select the top half of the samples
     samples = sorted(samples, key=lambda x: x[-1], reverse=True)
-    samples = samples[:len(samples) // 2]
+    samples = samples[:max(n_samples, len(samples) // 2)]
 
     weights = [s[-1] for s in samples]
-    print('after first selection average weight:', sum(weights) / len(weights))
-
-    import pdb; pdb.set_trace()
 
     import random
     random.seed(42)
@@ -555,9 +554,6 @@ def to_test_circumstance(test_plots, n_samples=100, output_path=None):
 
     assert(len(set(samples)) == len(samples))
 
-
-    print('after sampling average weight:', sum([s[-1] for s in samples]) / len(samples))
-
     sampled_conversations = []
     # now arrange the data into a list 
     for book_name, i, j, weight in samples:
@@ -580,39 +576,25 @@ def to_test_circumstance(test_plots, n_samples=100, output_path=None):
         conversation['plot'] = plot
         conversation['character_profiles'] = { c: test_plots[book_name]['character_profiles'][c] for c in conversation['major_characters'] }
         conversation['book'] = book_name
+        conversation['i_p'] = i
         conversation['i_c'] = j
+        conversation['tag'] = tag
 
         sampled_conversations.append(conversation)
-        print(f'Test Circumstance {book_name} {i} {j}')
+        print(f'Test Set Sample {book_name} {i} {j}')
 
     return sampled_conversations
 
 # Save the test plots
-with open(folder_path + 'test_plots_id_books.json', 'w', encoding='utf-8') as f:
-    json.dump(test_plots_id_books, f, ensure_ascii=False, indent=2)
+with open(args.dir + '/test/held_out_plots.json', 'w', encoding='utf-8') as f:
+    json.dump({'id': held_out_plots_id_books, 'ood': held_out_plots_ood_books}, f, ensure_ascii=False, indent=2)
 
-with open(folder_path + 'test_circumstance_id.json', 'w', encoding='utf-8') as f:
-    test_circumstance_id = to_test_circumstance(test_plots_id_books, n_samples=100)
-    json.dump(test_circumstance_id, f, ensure_ascii=False, indent=2)
+test_circumstance_id = to_test_circumstance(held_out_plots_id_books, n_samples=100, tag='id')
+test_circumstance_ood = to_test_circumstance(held_out_plots_ood_books, n_samples=100, tag='ood')
 
-with open(folder_path + 'test_plots_ood_books.json', 'w', encoding='utf-8') as f:
-    json.dump(test_plots_ood_books, f, ensure_ascii=False, indent=2)
+with open(args.dir + '/test/test_set.json', 'w', encoding='utf-8') as f:
+    test_circumstance = test_circumstance_id + test_circumstance_ood
+    json.dump(test_circumstance, f, ensure_ascii=False, indent=2)
 
-with open(folder_path + 'test_circumstance_ood.json', 'w', encoding='utf-8') as f:
-    test_circumstance_ood = to_test_circumstance(test_plots_ood_books, n_samples=100)
-    json.dump(test_circumstance_ood, f, ensure_ascii=False, indent=2)
 
-# collect the interested books and characters in test_circumstance_id and test_circumstance_ood
-with open(folder_path + 'interested_books_characters.json', 'w', encoding='utf-8') as f:
-    interested_books_characters = {}
-    for conversation in test_circumstance_id + test_circumstance_ood:
-        book_title = conversation['book']
-        interested_books_characters.setdefault(book_title, {})
-        interested_books_characters[book_title].update(conversation['character_profiles'])
 
-    num_characters = sum([len(v) for v in interested_books_characters.values()])
-    print(f'Num Books {len(interested_books_characters)}, Num Characters {num_characters} ')
-    json.dump(interested_books_characters, f, ensure_ascii=False, indent=2)
-
-with open(folder_path + 'test_plots_got.json', 'w', encoding='utf-8') as f:
-    json.dump(test_plots_got, f, ensure_ascii=False, indent=2)

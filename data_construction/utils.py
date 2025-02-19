@@ -15,7 +15,8 @@ import tiktoken
 import __main__
 from typing import Dict, List
 
-USER = "<USER>"
+with open('config.json', 'r') as f:
+	config = json.load(f)
 
 count_error = 0
 
@@ -39,6 +40,8 @@ def setup_logger(name, log_file, level=logging.INFO, quiet=False):
 		logger.addHandler(console_handler)
 
 	return logger
+
+logger = setup_logger(__name__, f'{__file__.split(".")[0]}.log', level=logging.INFO, quiet=False)
 
 from contextlib import contextmanager
 import tempfile
@@ -111,10 +114,6 @@ def safe_pickle_dump(obj, fname):
 	with open_atomic(fname, 'wb') as f:
 		pickle.dump(obj, f, -1) # -1 specifies highest binary protocol
 
-logger = setup_logger(__name__, f'{__file__.split(".")[0]}.log', level=logging.INFO, quiet=False)
-
-with open('config.json', 'r') as f:
-	config = json.load(f)
 
 ERROR_SIGN = '[ERROR]'
 
@@ -137,9 +136,6 @@ def cached(func):
 		else:
 			key = ( func.__name__, str(args), str(kwargs.items())) 
 
-		# new_cache_path = None
-
-
 		global cache
 		global reload_cache
 
@@ -154,17 +150,15 @@ def cached(func):
 				try:
 					cache = pickle.load(open(cache_path, 'rb'))  
 				except Exception as e:
-					# print cache_path and throw error
-					print(f'Error loading cache from {cache_path}')
+					# logger.info cache_path and throw error
+					logger.error(f'Error loading cache from {cache_path}')
 					raise e
 
-		legacy_errors = ['[TLE]', ERROR_SIGN]
-
-		if (cache_sign and key in cache) and cache[key] not in legacy_errors and not (cache[key] is None):
+		if (cache_sign and key in cache) and not (cache[key] is None):
 			return cache[key]
 		else:		
 			result = func(*args, **kwargs)
-			if result not in legacy_errors and result != None:
+			if result != None:
 				cache[key] = result
 				safe_pickle_dump(cache, cache_path)
 			return result
@@ -179,10 +173,7 @@ def encode(text):
 def decode(tokens):
 	return enc.decode(tokens)
 
-NEWLINE = enc.encode('\n')[0]
-
 def num_tokens_from_string(string: str, encoding_name: str = "cl100k_base") -> int:
-	import tiktoken
 	encoding = tiktoken.get_encoding(encoding_name)
 	num_tokens = len(encoding.encode(string))
 	logger.info(f"Number of tokens: {num_tokens}")
@@ -195,7 +186,6 @@ def get_response(model, messages, nth_generation=0, **kwargs):
 		messages = [{"role": "user", "content": messages}]
 
 	try:
-
 		import openai 
 		client = openai.OpenAI(api_key=config['api_key'], base_url=config['base_url'], timeout=180)
 
@@ -236,21 +226,21 @@ def get_response(model, messages, nth_generation=0, **kwargs):
 			response = completion.choices[0].message.content
 		
 		return response
-	# print error info
+
 	except Exception as e:
 		import traceback 
-		print(f'Prompt: {messages[:500]}')
-		print(f"Error in get_response: {str(e)}")
+		logger.error(f'Prompt: {messages[:500]}')
+		logger.error(f"Error in get_response: {str(e)}")
 
 		try:
-			print(f"Response: {response.text}")
-		except:
-			try:
-				print(f"Response: {response}")
-			except:
-				pass
+			if hasattr(response, 'text'):
+				logger.error(f"Response: {response.text}")
+			else:
+				logger.error(f"Response: {response}")
+		except Exception as e:
+			logger.error(f"Could not print response: {e}")
 		
-		print(f"Number of input tokens: {num_tokens_from_string(messages[0]['content'])}")
+		logger.error(f"Number of input tokens: {num_tokens_from_string(messages[0]['content'])}")
 
 		traceback.print_exc()
 		return None
@@ -496,7 +486,7 @@ def extract_json(text, **kwargs):
 
 		response = get_response(model="claude-3-5-sonnet-20240620", messages=[{"role": "user", "content": prompt}])
 
-		print(f'fixed json: {response}')	
+		logger.info(f'fixed json: {response}')	
 
 		return response
 	
@@ -519,7 +509,7 @@ Output only the corrected JSON string, without any additional explanations or co
 
 		response = get_response(model="claude-3-5-sonnet-20240620", messages=[{"role": "user", "content": prompt}])
 
-		print(f'fixed json: {response}')	
+		logger.info(f'fixed json: {response}')	
 
 		return response
 
@@ -556,7 +546,7 @@ Output only the corrected JSON string, without any additional explanations or co
 		if extracted_json:
 			return extracted_json
 		else:
-			print('Error parsing response: ', orig_text)
+			logger.error(f'Error parsing response: {orig_text}')
 		
 			global count_error
 			count_error += 1
@@ -582,84 +572,89 @@ Output only the corrected JSON string, without any additional explanations or co
 			return _extract_json(_fix_json(text))
 
 
-
-
-def ensure_scenes(cand_scenes, **kwargs):
-	if isinstance(cand_scenes, list) and len(cand_scenes) > 0 and {"scenario", "actor_role", "user_role", "topic", "leader", "max_rounds"}.issubset(cand_scenes[0].keys()):
-		return cand_scenes
-	else:
-		return False
-
-
 def get_response_json(post_processing_funcs=[extract_json], **kwargs):
-	
-	nth_generation = 0
+    """
+    Get and process a response from an LLM with retries and error handling.
+    
+    This function handles:
+    1. Getting responses from the LLM with retries
+    2. Handling copyright warnings by adjusting the prompt
+    3. Processing responses through a pipeline of post-processing functions
+    4. Fallback handling for parsing failures
+    
+    Args:
+        post_processing_funcs (list): List of functions to process the LLM response, defaults to [extract_json]
+        **kwargs: Additional arguments passed to get_response(), including:
+            - messages: List of message dicts for the LLM
+            - model: Name of LLM model to use
+            - max_retry: Max number of retry attempts (default 5)
+            
+    Returns:
+        dict: Processed JSON response from the LLM, or error dict if parsing fails
+    """
+    nth_generation = 0  # Track number of retry attempts
+    secondary_response = None  # Store backup response for parsing failures
 
-	second_rate_response = None
+    while True:
+        logger.info(f'{nth_generation}th generation')
+        response = get_response(**kwargs, nth_generation=nth_generation)
+        logger.info(f'response by LLM: {response}')
 
-	while (True):
-		logger.info(f'{nth_generation}th generation')
-		response = get_response(**kwargs, nth_generation=nth_generation)
-		
-		logger.info(f'response by LLM: {response}')
+        if response is None:
+            continue
 
-		if response is None:
-			continue 
-		
-		if len(kwargs['messages']) > 1:
-			# after trigger copyright warning, try once with three messages, and return to one message
-			kwargs['messages'] = kwargs['messages'][:1]
+        # Reset to single message if we previously added copyright handling messages
+        if len(kwargs['messages']) > 1:
+            kwargs['messages'] = kwargs['messages'][:1]
 
-		# check if trigger copyright warning such as 
-		words = response.split(' ')
-		if len(words) < 100 and 'reproduce' in response and 'copyright' in response and len(kwargs['messages']) == 1: 
-			warning = "I will not reproduce any copyrighted material. However, I'd be happy to provide a summary of the key plot points and character interactions from the given book excerpt, while being careful not to include any lengthy quotes or passages. Please let me know if you would like me to provide that type of summary."
-			kwargs['messages'].append({"role": "assistant", "content": warning})
-			kwargs['messages'].append({"role": "user", "content": "Yes, please provide that type of summary, but remember to follow my requirements."})
+        # Check for copyright warning in short responses
+        words = response.split(' ')
+        if len(words) < 100 and 'reproduce' in response and 'copyright' in response and len(kwargs['messages']) == 1:
+            # Add messages to handle copyright warning and request appropriate summary
+            warning = "I will not reproduce any copyrighted material. However, I'd be happy to provide a summary of the key plot points and character interactions from the given book excerpt, while being careful not to include any lengthy quotes or passages. Please let me know if you would like me to provide that type of summary."
+            kwargs['messages'].append({"role": "assistant", "content": warning})
+            kwargs['messages'].append({"role": "user", "content": "Yes, please provide that type of summary, but remember to follow my requirements."})
+            
+            nth_generation += 1
+            continue
 
-			nth_generation += 1
-			continue 
+        # Run response through post-processing pipeline
+        for i, post_processing_func in enumerate(post_processing_funcs):
+            if response is None:
+                break
+            
+            prev_response = response
+            response = post_processing_func(response, **kwargs)
 
+            # Special handling for parse_response failures
+            if post_processing_func.__name__ == 'parse_response' and response == False:
+                orig_response = get_response(**kwargs, nth_generation=nth_generation)
 
-		for i, post_processing_func in enumerate(post_processing_funcs):
-			if response is None:
-				break
-			
-			prev_response = response
+                # Store longest response as backup
+                if secondary_response:
+                    if len(orig_response) > len(secondary_response):
+                        secondary_response = orig_response
+                else:
+                    secondary_response = orig_response
 
-			response = post_processing_func(response, **kwargs)
+                logger.info(f'orig_response: {orig_response}\nNum Tokens: {num_tokens_from_string(orig_response)}')
 
+        json_response = response
 
-			if post_processing_func.__name__ == 'parse_response' and response == False:
+        # Break if we got a valid response, otherwise retry
+        if json_response:
+            break
+        else:
+            nth_generation += 1
+            if nth_generation > kwargs.get('max_retry', 5):
+                # Return error response with backup data if parse_response failed
+                if 'parse_response' in [f.__name__ for f in post_processing_funcs]:
+                    return {"fail_to_parse_response": secondary_response}
 
-				orig_response = get_response(**kwargs, nth_generation=nth_generation) 
-
-				# typically because of parsing errors of json 
-				if second_rate_response:
-					if len(orig_response) > len(second_rate_response):
-						second_rate_response = orig_response
-				else:
-					second_rate_response = orig_response
-
-				logger.info(f'orig_response: {orig_response}\nNum Tokens: {num_tokens_from_string(orig_response)}')
-
-
-
-		#print(f'parse results: {json_response}')
-		json_response = response 
-		
-		if json_response:
-			break 
-		else:
-			nth_generation += 1
-			if nth_generation > kwargs.get('max_retry', 5):
-				if 'parse_response' in [f.__name__ for f in post_processing_funcs]:
-					return {"fail_to_parse_response": second_rate_response}
-	
-	return json_response
+    return json_response
 
 def print_json(data):
-	print(json.dumps(data, ensure_ascii=False, indent=2))
+	logger.info(json.dumps(data, ensure_ascii=False, indent=2))
 
 def save_json(data: List[Dict], file_path: str):
 	with open(file_path, "w", encoding='utf-8') as f:
