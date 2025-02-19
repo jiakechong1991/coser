@@ -19,14 +19,16 @@ def parse_args():
     parser = argparse.ArgumentParser(description='Construct CoSER-style dataset from source books')
     parser.add_argument('--input', type=str, required=True,
                       help='Input jsonl file path containing books data')
-    parser.add_argument('--output_dir', type=str, default='data/curated',
-                      help='Output directory path (default: data/curated)')
+    parser.add_argument('--output_dir', type=str, default='data',
+                      help='Output directory path (default: data')
     parser.add_argument('--num_workers', type=int, default=1,
                       help='Number of parallel workers (default: 1)')
     parser.add_argument('--model', type=str, default="gpt-4o",
                       help='Model to use for data construction (default: gpt-4o)')
     parser.add_argument('--candidate_model', type=str, default="gpt-4o",
                       help='Another candidate model to use for data construction when the main model fails (default: gpt-4o)')
+    parser.add_argument('--regenerate', action='store_true',
+                      help='Force regenerate data even if results already exist (default: False)')
     args = parser.parse_args()
     
     # Create output directory if it doesn't exist
@@ -537,11 +539,11 @@ def extract(book, chunk_size=8192):
             - fail_to_parse_responses: List of chunks that failed parsing
     """
     # Set up save path and skip if already processed
-    save_dir = f'{args.output_dir}-temp'
+    save_dir = f'{args.output_dir}/extracted'
     os.makedirs(save_dir, exist_ok=True)
 
     save_path = f'{save_dir}/{book["title"]}.json'
-    if os.path.exists(save_path):
+    if os.path.exists(save_path) and not args.regenerate:
         return 
 
     # Set up cache path
@@ -654,7 +656,7 @@ def restore_from_cache(book):
     """
     # Load existing extracted results
 
-    save_dir = f'{args.output_dir}-temp'
+    save_dir = f'{args.output_dir}/extracted'
     os.makedirs(save_dir, exist_ok=True)
 
     with open(f'{save_dir}/{book["title"]}.json', 'r', encoding='utf-8') as f:
@@ -663,7 +665,7 @@ def restore_from_cache(book):
     save_path = f'{save_dir}/{book["title"]}.json'
 
     # Skip if already processed
-    if os.path.exists(save_path):
+    if os.path.exists(save_path) and not args.regenerate:
        return 
 
     # Load cached API responses
@@ -872,18 +874,18 @@ def assemble(book):
     from utils import set_cache_path
     set_cache_path(f'.cache/cache_{book["title"]}.pkl')
     
-    os.makedirs(args.output_dir, exist_ok=True)
+    os.makedirs(f'{args.output_dir}/final', exist_ok=True)
 
-    save_path = f'{args.output_dir}/{book["title"]}.json'
+    save_path = f'{args.output_dir}/final/{book["title"]}.json'
 
     # Skip if already processed
-    if os.path.exists(save_path):
+    if os.path.exists(save_path) and not args.regenerate:
         return 
     
     logger.info(f"Assembling book: {book['title']}")
     
     # Load extracted plot data
-    with open(f'{args.output_dir}-temp/{book["title"]}.json', 'r', encoding='utf-8') as f:
+    with open(f'{args.output_dir}/extracted/{book["title"]}.json', 'r', encoding='utf-8') as f:
         results = json.load(f)
 
     plots = results['plots']
