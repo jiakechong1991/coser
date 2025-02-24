@@ -500,21 +500,24 @@ if __name__ == "__main__":
         repeat_times = 3
         nth_exps = range(repeat_times)
 
+    # Run experiments for each repeat
     for nth_exp in nth_exps:
+        # Configure experiment name and logging
         exp_name = 'eval' 
         if args.continue_from > 0: exp_name += f'-continue_from={args.continue_from}'    
         if nth_exp > 0: exp_name += f'-repeat={nth_exp}'
         
         logger = setup_logger(__name__, './' + exp_name + '.log')
 
+        # Initialize result storage
         all_cases = {} 
-            
         all_scores = {} 
 
         from concurrent.futures import ProcessPoolExecutor
         import functools
 
         def generate(exp_args):
+            """Run simulation for given experiment args"""
             actor_model, args, nth_exp = exp_args
         
             results = gca_simulation(
@@ -529,6 +532,7 @@ if __name__ == "__main__":
             return results
 
         def evaluate(exp_args):
+            """Run evaluation for given experiment args"""
             actor_model, args, nth_exp = exp_args
 
             scores, cases = gca_judging(
@@ -541,10 +545,13 @@ if __name__ == "__main__":
 
             return scores, cases
         
-        actor_models = [args.actor_model, 'gpt-4o-mini'] # you can modify the list to expand to multiple models
+        # List of actor models to evaluate
+        actor_models = [args.actor_model] # you can modify the list to expand to multiple models
 
+        # Create experiment args for each actor model
         exp_args = [(actor_model, args, nth_exp) for actor_model in actor_models]
 
+        # Parallel execution path when multiple workers available
         if args.num_workers > 1 and len(exp_args) > 1:
             # First run all generate tasks simultaneously
             generate_futures = []
@@ -553,7 +560,7 @@ if __name__ == "__main__":
                     future = generate_executor.submit(generate, exp_arg)
                     generate_futures.append((future, exp_arg))
             
-            # As generate tasks complete, run up to 6 evaluate tasks at a time
+            # As generate tasks complete, run evaluate tasks in parallel
             with ProcessPoolExecutor(max_workers=args.num_workers) as evaluate_executor:
                 evaluate_futures = []
                 
@@ -568,22 +575,24 @@ if __name__ == "__main__":
                     scores, cases = evaluate_future.result()
 
                     actor_model = exp_arg[0]
+                    # Create identifier for this model run
                     actor_setting = f'{actor_model}{"_rag=" + args.retrieval if args.retrieval else ""}'
 
                     all_scores[actor_setting] = scores
                     all_cases[actor_setting] = cases
 
+        # Sequential execution path
         else:
             for exp_arg in exp_args:
                 generate(exp_arg)
                 scores, cases = evaluate(exp_arg)
 
                 actor_model = exp_arg[0]
+                # Create identifier for this model run
                 actor_setting = f'{actor_model}{"_rag=" + args.retrieval if args.retrieval else ""}'
 
                 all_scores[actor_setting] = scores
                 all_cases[actor_setting] = cases
                 
+        # Log final results
         logger.info(f'Evaluation results:\n{json.dumps(all_scores, ensure_ascii=False, indent=2)}')
-
-        
