@@ -58,7 +58,7 @@ python data_construction/main.py --input data books_example.jsonl --num_workers 
 This step transforms the curated book data into: 1) training samples in sharegpt format, and 2) a test set. These data are used for given-circumstance acting evaluation (GCA) training and evaluation. 
 
 ```bash
-python data_construction/convert_data_format.py 
+python data_construction/transform.py 
 ```
 
 **Arguments**
@@ -68,12 +68,34 @@ The script will generate:
 - Training data: `data/train/sft_sharegpt.json`
 - Test set: `data/test/test_set.json`
 
-### Evaluation via GCA (Given-Circumtance Acting)
+## Evaluation 
+
+To evaluate an LLM' role-playing performance via Given-Circumtance Acting (GCA):
 
 ```bash
-python gca_evaluation/eval_reproduce.py
+python gca_evaluation/main.py --test_file data/test/test_set.json --actor_model gpt-4o --judge_model gpt-4o
 ```
 
+**Arguments**
+- `--test_file`: Path to test dataset (default: data/test/test_set.json)
+- `--actor_model`: Model used for character role-playing (default: gpt-4o)
+- `--judge_model`: Model used for evaluation (default: gpt-4o)
+- `--env_model`: Model for environment responses (default: gpt-4o)
+- `--nsp_model`: Model for next-speaker prediction (default: gpt-4o-mini). For better cost-efficiency, we recommend using CoSER-70B or other self-deployed models
+- `--retrieval`: Enable retrieval augmentation [None|raw_text|expr1|expr3|conv1|expr3_conv1|expr10_conv1]
+- `--wo_thought`: Disable inner thoughts in GCA simulation
 
+The evaluation process consists of two stages:
+1. Simulation: Generated conversations are saved to exp/simulation/
+2. Judging: Assessment results are saved to exp/evaluation/
 
- 
+The evaluation adopts two types of metrics:
+1. LLM Judge Scoring (0-100) in terms of:
+   - Storyline Consistency: Alignment with original dialogue
+   - Anthropomorphism: Human-like behavior
+   - Character Fidelity: Faithful character portrayal
+   - Storyline Quality: Natural conversation development
+   - Average Score (of the above dimensions)
+2. Automated Metrics (comparing generated conversations with ground truth dialogues):
+   - BLEU
+   - ROUGE-L

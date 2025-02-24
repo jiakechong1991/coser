@@ -10,11 +10,16 @@ import jsonlines
 import requests 
 import io
 import pickle
+import random 
+import tiktoken
 import copy
 import __main__
 from typing import Dict, List
 
-USER = "<USER>"
+with open('config.json', 'r') as f:
+	config = json.load(f)
+
+streaming = False
 
 def setup_logger(name, log_file, level=logging.INFO, quiet=False):
 	logger = logging.getLogger(name)
@@ -40,14 +45,7 @@ def setup_logger(name, log_file, level=logging.INFO, quiet=False):
 
 	return logger
 
-
-
-logger = setup_logger(__name__ + '_main', f'{__file__}.log', level=logging.INFO, quiet=False)
-
-with open('config.json', 'r') as f:
-	config = json.load(f)
-
-ERROR_SIGN = '[ERROR]'
+logger = setup_logger(__name__, f'{__file__.split(".")[0]}.log', level=logging.INFO, quiet=False)
 
 cache_path = 'cache.pkl'
 cache_sign = True
@@ -79,18 +77,14 @@ def cached(func):
 					cache = pickle.load(open(cache_path, 'rb'))  
 				except Exception as e:
 					# print cache_path and throw error
-					print(f'Error loading cache from {cache_path}, set cache to empty dict')
+					logger.error(f'Error loading cache from {cache_path}, set cache to empty dict')
 					cache = {}
 
-		if (cache_sign and key in cache and cache[key] not in [None, ERROR_SIGN] and cache[key] != ''):
-			#print(f'{key}\ncache hit')
+		if (cache_sign and key in cache) and not (cache[key] is None or cache[key] == ''):
 			return cache[key]
 		else:
-			#find the most similar keys in cache via edit distance
-
-
 			result = func(*args, **kwargs)
-			if result != ERROR_SIGN and result != None:
+			if result != None:
 				cache[key] = result
 				pickle.dump(cache, open(cache_path, 'wb'))
 				#safe_pickle_dump(cache, cache_path)
@@ -100,21 +94,17 @@ def cached(func):
 	return wrapper
 
 def num_tokens_from_string(string: str, encoding_name: str = "cl100k_base") -> int:
-	import tiktoken
 	encoding = tiktoken.get_encoding(encoding_name)
 	num_tokens = len(encoding.encode(string, disallowed_special=()))
 	#logger.info(f"Number of tokens: {num_tokens}")
 	return num_tokens
 
-tokenizer = None
-#@cached
+@cached
 def get_response(model, messages, max_tokens=None, nth_generation=0):
-	global tokenizer
-
-	model_name_map = {"claude35sonnet": "claude-3-5-sonnet-20240620"}
-	
-	model = model_name_map.get(model, model)
-
+	# if messages is str
+	if isinstance(messages, str):
+		messages = [{"role": "user", "content": messages}]
+		
 	# correct 'system' to 'user'
 	if model.startswith('claude') and messages and messages[0]['role'] == 'system': messages[0]['role'] = 'user'	
 
@@ -127,20 +117,16 @@ def get_response(model, messages, max_tokens=None, nth_generation=0):
 			merged_messages.append(copy.deepcopy(message))
 
 	messages = merged_messages
-
-	if max_tokens is None:
-		if 'llama3' in model or 'step' in model:
-			max_tokens = 2048
-		elif model == 'gpt3.5': 
-			max_tokens = 4096
-		else:
-			max_tokens = 8192
 	
 	import openai 
 	try:
-		if True:
-			# close-sourced models
-			client = openai.OpenAI(api_key=config['api_key'], base_url=config['base_url'], timeout=180)
+		import openai 
+		client = openai.OpenAI(api_key=config['api_key'], base_url=config['base_url'], timeout=180)
+
+		# you may need to adjust the default max_tokens for your models 
+		if max_tokens is None: max_tokens = 8196
+
+		if streaming: 
 			stream = client.chat.completions.create(
 				model=model,
 				messages=messages,
@@ -161,23 +147,32 @@ def get_response(model, messages, max_tokens=None, nth_generation=0):
 
 					if len(chunk.choices) == 0 and response.strip()[-1] == '}':
 						break 
-
+		else:
+			completion = client.chat.completions.create(
+				model=model,
+				messages=messages,
+				max_tokens=max_tokens,
+				temperature=0 if nth_generation == 0 else 1,
+				timeout=180
+			)
+			response = completion.choices[0].message.content
+		
 		return response
-	# print error info
+	# logger.error error info
 	except Exception as e:
 		import traceback 
-		print(f'Prompt: {messages[-1]["content"][:500]}')
-		print(f"Error in get_response: {str(e)} from model {model}")
+		logger.error(f'Prompt: {messages[-1]["content"][:500]}')
+		logger.error(f"Error in get_response: {str(e)} from model {model}")
 
 		try:
-			print(f"Response: {response.text}")
-		except:
-			try:
-				print(f"Response: {response}")
-			except:
-				pass
+			if hasattr(response, 'text'):
+				logger.error(f"Response: {response.text}")
+			else:
+				logger.error(f"Response: {response}")
+		except Exception as e:
+			logger.error(f"Could not print response: {e}")
 		
-		print(f"Number of input tokens: {num_tokens_from_string(messages[0]['content'])}")
+		logger.error(f"Number of input tokens: {num_tokens_from_string(messages[0]['content'])}")
 
 		traceback.print_exc()
 		return None
@@ -195,6 +190,18 @@ def lang_detect(text):
 		lang = 'en'
 	return lang
 	
+
+USER = '<USER>'
+
+def remove_inner_thoughts(dialogue: str) -> str:
+	cleaned_dialogue = re.sub(r'\[.*?\]', '', dialogue)
+
+	cleaned_dialogue = '\n'.join(line.strip() for line in cleaned_dialogue.split('\n'))
+	
+	cleaned_dialogue = re.sub(r'\n+', '\n', cleaned_dialogue)
+	
+	return cleaned_dialogue.strip()
+
 def add_speaker_name(dialogue: str, speaker: str) -> str:
 	# Check if the dialogue already contains a speaker prefix at the beginning of any line
 	if any(line.strip().startswith(f"{speaker}:") or line.strip().startswith(f"{speaker}：") for line in dialogue.split('\n')):
@@ -203,24 +210,12 @@ def add_speaker_name(dialogue: str, speaker: str) -> str:
 	# Add the speaker name at the beginning
 	return f"{speaker}: {dialogue}"
 
-def remove_inner_thoughts(dialogue: str) -> str:
-
-	cleaned_dialogue = re.sub(r'\[.*?\]', '', dialogue)
-	
-	cleaned_dialogue = '\n'.join(line.strip() for line in cleaned_dialogue.split('\n'))
-	
-	cleaned_dialogue = re.sub(r'\n+', '\n', cleaned_dialogue)
-
-
-	
-	return cleaned_dialogue.strip()
-
 def load_json(file_path):
 	with open(file_path, 'r', encoding='utf-8') as f:
 		data = json.load(f)
 	return data
 
-def get_character_prompt(book_name, character, character_profile, background, scenario, thought, thoughtless=False, other_character_profiles=None, exclude_plot_summary=False, fixed_template=False, add_output_example=False, add_rag=False):
+def get_character_prompt(book_name, character, character_profile, background, scenario, motivation, thoughtless=False, other_character_profiles=None, exclude_plot_summary=False, fixed_template=False, add_output_example=False, add_rag=False):
 
 	if thoughtless:
 		output_format = "Your output should include **speech** and **action**. Use (your action) for actions, which others can see."
@@ -242,10 +237,10 @@ def get_character_prompt(book_name, character, character_profile, background, sc
 		other_character_profiles_str = ''
 	
 	if fixed_template:
-		if thought: thought = f"===Your Inner Thoughts===\n{thought}\n\n"
+		if motivation: motivation = f"===Your Inner Thoughts===\n{motivation}\n\n"
 		if other_character_profiles_str: other_character_profiles_str = f"===Information about the other Characters===\n{other_character_profiles_str}\n\n"
 
-		system_prompt = f"You are {character} from {book_name}.\n\n==={character}'s Profile===\n{character_profile}\n\n===Current Scenario===\n{scenario}\n\n{other_character_profiles_str}{thought}\n\n"
+		system_prompt = f"You are {character} from {book_name}.\n\n==={character}'s Profile===\n{character_profile}\n\n===Current Scenario===\n{scenario}\n\n{other_character_profiles_str}{motivation}\n\n"
 		
 		if add_rag:
 			system_prompt += "===Relevant Background Information==={retrieved_knowledge}\n\n"
@@ -263,7 +258,7 @@ def get_character_prompt(book_name, character, character_profile, background, sc
 			"current_scenario": [f"The current scenario is:\n{scenario}", f"Current scenario:\n{scenario}", f"The situation you are in is:\n{scenario}", f"Here is the situation you are in:\n{scenario}"],
 			"current_scenario_with_plot_summary": [f"The current scenario and its background are:\nBackground: {background}\nCurrently: {scenario}", f"Current scenario and the background:\nScenario: {scenario}\nMore Background: {background}", f"The situation you are in is:\nStory arc summary: {background}\nCurrent scenario: {scenario}", f"Here is the situation you are in:\nSummary of relevant plots: {background}\nScenario: {scenario}"],
 			"other_characters_profile": [f"Here is the your knowledge about the other characters:\n{other_character_profiles_str}", f"Information about other characters:\n{other_character_profiles_str}", f"The background of other characters is as follows:\n{other_character_profiles_str}"],
-			"thought": [f"Your thoughts are:\n{thought}", f"Your thoughts in this situation are:\n{thought}", f"Your inner thoughts are:\n{thought}", f"Your inner monologue is:\n{thought}", f"Your inner thoughts in the scenario are:\n{thought}"],
+			"thought": [f"Your thoughts are:\n{motivation}", f"Your thoughts in this situation are:\n{motivation}", f"Your inner thoughts are:\n{motivation}", f"Your inner monologue is:\n{motivation}", f"Your inner thoughts in the scenario are:\n{motivation}"],
 			"requirements": [output_format, "" if thoughtless else output_format],
 		},
 		"=": {
@@ -305,7 +300,7 @@ def get_character_prompt(book_name, character, character_profile, background, sc
 		if other_character_profiles_str:
 			system_prompt += random.choice(templates["natural"]["other_characters_profile"]) + "\n\n"
 
-		if thought:
+		if motivation:
 			system_prompt += random.choice(templates["natural"]["thought"]) + "\n\n"
 		
 		if add_rag:
@@ -339,10 +334,10 @@ def get_character_prompt(book_name, character, character_profile, background, sc
 			system_prompt += other_character_profiles_str + "\n\n"
 
 		# Thought section (if not empty)
-		if thought:
+		if motivation:
 			section_title = random.choice(templates["pieces"]["thought"])
 			system_prompt += decorator.format(section_title) + "\n"
-			system_prompt += thought + "\n\n"
+			system_prompt += motivation + "\n\n"
 		
 		if add_rag:
 			section_title = "Relevant Background Information"
@@ -433,17 +428,15 @@ def print_conversation_to_file(conversation_data: Dict, file_path: str):
 
 	return 
 
-count_error = 0
-
 def extract_json(text, **kwargs):
 	def _fix_json(json_response):
 		prompt = f'''I will provide you with a JSON string that contains errors, making it unparseable by `json.loads`. The most common issue is the presence of unescaped double quotes inside strings. Your task is to output the corrected JSON string. The JSON string to be corrected is:
 {json_response}
 '''
 
-		response = get_response(model="claude-3-5-sonnet-20240620", messages=[{"role": "user", "content": prompt}])
+		response = get_response(model=kwargs['model'], messages=[{"role": "user", "content": prompt}])
 
-		print(f'fixed json: {response}')	
+		logger.info(f'fixed json: {response}')	
 
 		return response
 
@@ -481,10 +474,7 @@ def extract_json(text, **kwargs):
 		if extracted_json:
 			return extracted_json
 		else:
-			print('Error parsing response: ', orig_text)
-
-			global count_error
-			count_error += 1
+			logger.error('Error parsing response: ', orig_text)
 			return None
 
 	res = _extract_json(text)
@@ -527,7 +517,24 @@ def get_response_with_retry(**kwargs):
 	return get_response_json([], **kwargs)
 
 def get_response_json(post_processing_funcs=[extract_json], **kwargs):
-	
+	"""
+    Get and process a response from an LLM with retries and error handling.
+    
+    This function handles:
+    1. Getting responses from the LLM with retries
+    2. Processing responses through a pipeline of post-processing functions
+    3. Fallback handling for parsing failures
+    
+    Args:
+        post_processing_funcs (list): List of functions to process the LLM response, defaults to [extract_json]
+        **kwargs: Additional arguments passed to get_response(), including:
+            - messages: List of message dicts for the LLM
+            - model: Name of LLM model to use
+            - max_retry: Max number of retry attempts (default 5)
+            
+    Returns:
+        dict: Processed JSON response from the LLM, or error dict if parsing fails
+    """
 	nth_generation = 0
 
 	while (True):
@@ -547,7 +554,7 @@ def get_response_json(post_processing_funcs=[extract_json], **kwargs):
 			break 
 		else:
 			nth_generation += 1
-			if nth_generation > 10:				
+			if nth_generation > kwargs.get('max_retry', 5):				
 				break	
 	
 	return json_response
@@ -565,33 +572,47 @@ def read_json(file_path: str) -> List[Dict]:
 	return data
 
 def tokenize_words(text):
-
-		
-		import regex
-		pattern = r'\b\w+\b|[\u4e00-\u9fff]|[\u3040-\u309F\u30A0-\u30FF]|\d|[\p{P}\p{S}]'
-		tokens = regex.findall(pattern, text)
+	import regex
+	pattern = r'\b\w+\b|[\u4e00-\u9fff]|[\u3040-\u309F\u30A0-\u30FF]|\d|[\p{P}\p{S}]'
+	tokens = regex.findall(pattern, text)
 
 
-		tokens_expanded = []
-		for token in tokens:
-			if re.match(r'[\u4e00-\u9fff]|[\u3040-\u309F\u30A0-\u30FF]', token):
-				tokens_expanded.extend(list(token))
-			else:
-				tokens_expanded.append(token)
-		return tokens_expanded
+	tokens_expanded = []
+	for token in tokens:
+		if re.match(r'[\u4e00-\u9fff]|[\u3040-\u309F\u30A0-\u30FF]', token):
+			tokens_expanded.extend(list(token))
+		else:
+			tokens_expanded.append(token)
+	return tokens_expanded
 
 def fix_repeation(response):
+	"""
+	Fix repetitive text patterns in the response by detecting and removing repetitions.
+	
+	This function handles three types of repetition detection:
+	1. Long letter substrings (100+ characters)
+	2. Consecutive repetitions of token sequences
+	3. Non-consecutive repetitions of token sequences
+	
+	Args:
+		response (str): The text response to check for repetitions
+		
+	Returns:
+		str: The fixed text with repetitions removed if repetitions were found
+		False: If no repetitions were detected
+	"""
 
 	def detect_repetitions(tokens, min_length=5, max_length=30, threshold=0.1):
-
+		"""Check for consecutive repetitions of token sequences"""
 		total_length = len(tokens)
 		repetitions = 0
 	
-		
+		# Try different lengths of subsequences
 		for length in range(min_length, min(max_length + 1, total_length + 1)):
 			for i in range(total_length - length + 1):
 				substr = tokens[i:i + length] 
 
+				# Check if this subsequence repeats consecutively up to 4 times
 				is_repeated = True
 				for repeat_idx in range(1, 5):
 					check_pos = i + (repeat_idx * length)
@@ -601,24 +622,26 @@ def fix_repeation(response):
 						break
 				
 				if is_repeated:
-					return tokens[:i + length]
+					return tokens[:i + length]  # Return text up to first repetition
 
 		return False
 
 	def detect_repetitions2(tokens, min_length=15, max_length=30, threshold=0.1):
+		"""Check for non-consecutive repetitions of token sequences"""
 		total_length = len(tokens)
 		repetitions = 0
 		
 		first_repeat_idx = 999999999999999
 		first_start_idx = {}
 
-
+		# Try different lengths of subsequences
 		for length in range(min_length, min(max_length + 1, total_length + 1)):
 			substr_count = {}
 
 			for i in range(total_length - length + 1):
 				substr = tuple(tokens[i:i + length]) 
-				if substr_count.get(substr, 0) > 0 :
+				if substr_count.get(substr, 0) > 0:
+					# Found a repeat - check if it's far enough from first occurrence
 					if i - first_start_idx[substr] >= length:			
 						first_repeat_idx = min(first_repeat_idx, i)
 				else:
@@ -626,81 +649,74 @@ def fix_repeation(response):
 
 				substr_count[substr] = substr_count.get(substr, 0) + 1
 			
-		
 			repetitions += sum(count > 1 for count in substr_count.values())
-			
-		
 
 		repetition_rate = repetitions / total_length if total_length else 0
 	
 		if first_repeat_idx < 999999999999999:
-			return tokens[:first_repeat_idx]
+			return tokens[:first_repeat_idx]  # Return text up to first repetition
 		else:
 			return False
 
 	def concatenate_tokens(tokens):
-
+		"""Reconstruct text from tokens with proper spacing and punctuation"""
 		text = ""
-
 		last_type = None
 		
 		for token in tokens:
-
+			# Determine token type (CJK, punctuation, or other)
 			current_type = 'CJK' if re.match(r'[\u4e00-\u9fff]|[\u3040-\u309F\u30A0-\u30FF]', token) else 'Other'
 			import string
 			if token in string.punctuation:
 				current_type = 'P'
 
+			# Add space between certain token types
 			if last_type in ['Other', 'P'] and current_type == 'Other':
 				text += " " + token
 			else:
 				text += token
-				
 
 			last_type = current_type
 		
-
+		# Add appropriate ending punctuation based on last character
 		if re.match(r'[a-zA-Z0-9]+$', text[-1]):
 			text += '.'
-
 		if re.match(r'[\u4e00-\u9fff]+$', text[-1]):
 			text += '。'
-
 		if re.match(r'[\u3040-\u309F\u30A0-\u30FF]+$', text[-1]):
 			text += '。'
 
 		return text
 
 	def find_long_letter_substrings(s):
-		# Regular expression to match substrings of letters (a-Z and A-Z) with a length of at least 100
+		"""Find substrings of letters that are 100+ characters long"""
 		pattern = r'[a-zA-Z]{100,}'
-		# Find all matches
 		matches = re.findall(pattern, s)
 		return matches
 
 	repeat_sign = False 
 
+	# First check for very long letter sequences
 	_ = find_long_letter_substrings(response)
 	if _:
 		for substr in _:
 			response = response.replace(substr, substr[:20])
 		repeat_sign = True
 
-
+	# Then check for token sequence repetitions
 	tokens = tokenize_words(response)
-
 	_ = detect_repetitions(tokens)
-	if _ == False: # detection not recognized in the first function
-		_ = detect_repetitions2(tokens)
+	if _ == False:  # If no consecutive repetitions found
+		_ = detect_repetitions2(tokens)  # Check for non-consecutive repetitions
 
 	if _:
 		response = concatenate_tokens(_)
 		repeat_sign = True
 
 	if repeat_sign:
-		return response
+		return response  # Return fixed text if repetitions were found
 	else:
-		return False
+		return False  # Return False if no repetitions detected
 
 from collections import Counter
 import math
@@ -721,11 +737,30 @@ def ttr(text):
 	return len(set(words)) / len(words)
 
 
+from nltk.translate.bleu_score import sentence_bleu
+from nltk.tokenize import word_tokenize
+from rouge import Rouge
+import nltk
+
+def calculate_bleu_rouge(reference, simulation):
+
+    simulation_str = '\n\n'.join([m['content'].strip('\n') for m in simulation])
+    reference_str = '\n\n'.join([f"{m['character']}: {m['message']}".strip('\n') for m in reference])
+
+    # remove the speaker name
+    reference_tokens = word_tokenize(reference_str.lower())
+    simulation_tokens = word_tokenize(simulation_str.lower())
+    
+    bleu = sentence_bleu([reference_tokens], simulation_tokens)
+    
+    rouge_l = Rouge().get_scores(simulation_str, reference_str)[0]['rouge-l']['f']
+    
+    return bleu, rouge_l
+
 
 if __name__ == '__main__':
 	messages = [{"role": "system", "content": "Hello, how are you?"}]
-	model = "claude-3-5-sonnet-20240620"
-	#model = 'gpt-4o'
+	model = "gpt-4o"
 
 	print(get_response(model, messages))
 		
