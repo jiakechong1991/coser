@@ -1264,7 +1264,7 @@ if __name__ == '__main__':
 
     # Clean book titles
     for book in books_data:
-        book['title'] = book['title'].replace('/', '-').replace('.', ' ')
+        book['title'] = book['title'].replace('/', '-').replace(':', '_').replace('.', ' ')
 
     logger.info(f"Processing {len(books_data)} books")
 

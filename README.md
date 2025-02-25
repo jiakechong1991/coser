@@ -2,7 +2,7 @@
 
 Official Code for "CoSER: Coordinating LLM-Based Persona Simulation of Established Roles"
 
-Our data is currently undergoing internal review for safety concerns. The complete dataset and models will be released after safety checks, expected in February 2025. We have released the unorganized code to help understand our implementation. The organized version of the code will also be ready in February 2025.
+We are uploading the complete dataset and models. Please access our dataset from Huggingface: https://huggingface.co/datasets/Neph0s/CoSER.
 
 For reference, we have provided example files in the following directories:
 - `data/`: Sample data files showing the expected format and structure

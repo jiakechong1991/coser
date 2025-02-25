@@ -311,7 +311,7 @@ def process(file):
                             
                             from utils import get_character_prompt
                             system_prompt = get_character_prompt(
-                                book_name, character, character_profile, plot, conversation, 
+                                book_name, character, character_profile, plot['summary'], conversation['scenario'], 
                                 motivation, thoughtless, 
                                 other_character_profiles=tmp_character_profiles if with_other_character_profiles else None
                             )

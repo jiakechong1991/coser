@@ -18,13 +18,14 @@ from typing import Dict, List
 with open('config.json', 'r') as f:
 	config = json.load(f)
 
-count_error = 0
-
 streaming = False
 
 def setup_logger(name, log_file, level=logging.INFO, quiet=False):
 	logger = logging.getLogger(name)
 	logger.setLevel(level)
+
+	if logger.hasHandlers():
+		logger.handlers.clear()
 
 	file_handler = logging.FileHandler(log_file, encoding='utf-8')
 	file_handler.setLevel(logging.DEBUG)
@@ -152,7 +153,7 @@ def cached(func):
 				except Exception as e:
 					# logger.info cache_path and throw error
 					logger.error(f'Error loading cache from {cache_path}')
-					raise e
+					cache = {}
 
 		if (cache_sign and key in cache) and not (cache[key] is None):
 			return cache[key]
@@ -281,13 +282,16 @@ def load_json(file_path):
 		data = json.load(f)
 	return data
 
-def get_character_prompt(book_name, character, character_profile, plot, conversation, thought, thoughtless=False, other_character_profiles=None, exclude_plot_summary=False, fixed_template=False):
+def get_character_prompt(book_name, character, character_profile, background, scenario, motivation, thoughtless=False, other_character_profiles=None, exclude_plot_summary=False, fixed_template=False, add_output_example=False, add_rag=False):
 
 	if thoughtless:
 		output_format = "Your output should include **speech** and **action**. Use (your action) for actions, which others can see."
 	else:
 		output_format = "Your output should include **thought**, **speech**, and **action**. Use [your thought] for thoughts, which others can't see. Use (your action) for actions, which others can see."
-	
+
+		if add_output_example:
+			output_format = "Your output should include **thought**, **speech**, and **action**. Use [your thought] for thoughts, which others can't see, e.g. [I'm terrified, but I must appear strong.]. Use (your action) for actions, which others can see, such as (watches silently, trying to control her fear and anger)."
+
 	if other_character_profiles:
 		assert isinstance(other_character_profiles, Dict)
 		other_character_profiles_str = ''
@@ -298,11 +302,17 @@ def get_character_prompt(book_name, character, character_profile, plot, conversa
 				other_character_profiles_str += f"{decorator}{other_character}: {profile}\n\n"
 	else:
 		other_character_profiles_str = ''
-
+	
 	if fixed_template:
-		if thought: thought = f"===Your Inner Thoughts===\n{thought}\n\n"
+		if motivation: motivation = f"===Your Inner Thoughts===\n{motivation}\n\n"
+		if other_character_profiles_str: other_character_profiles_str = f"===Information about the other Characters===\n{other_character_profiles_str}\n\n"
 
-		system_prompt = f"You are {character} from {book_name}.\n\n==={character}'s Profile===\n{character_profile}\n\n===Current Scenario===\n{conversation['scenario']}\n\n{thought}===Requirements===\n{output_format}\n\n"
+		system_prompt = f"You are {character} from {book_name}.\n\n==={character}'s Profile===\n{character_profile}\n\n===Current Scenario===\n{scenario}\n\n{other_character_profiles_str}{motivation}\n\n"
+		
+		if add_rag:
+			system_prompt += "===Relevant Background Information==={retrieved_knowledge}\n\n"
+		
+		system_prompt += f"===Requirements===\n{output_format}\n\n"
 
 		return system_prompt
 	
@@ -312,10 +322,10 @@ def get_character_prompt(book_name, character, character_profile, plot, conversa
 		"begin": [f"You are {character}.", f"Play the role of {character}.", f"Imagine you are {character}.", f"Think, speak, and act like {character}.", f"Step into the shoes of {character}.", f"Immerse yourself in the character of {character}.", f"You are roleplaying as {character}.", f"You will be portraying {character}.", f"Roleplay as {character}.", f"Your role is to be {character}.", f"You are {character} from {book_name}.", f"Play the role of {character} from {book_name}.", f"Imagine you are {character} from {book_name}.", f"Think, speak, and act like {character} from {book_name}.", f"Step into the shoes of {character} from {book_name}.", f"Immerse yourself in the character of {character} from {book_name}.", f"You are roleplaying as {character} from {book_name}.", f"You will be portraying {character} from {book_name}.", f"Roleplay as {character} from {book_name}.", f"Your role is to be {character} from {book_name}."],
 		"natural": {
 			"character_profile": [f"The profile of {character} is as follows:\n{character_profile}", f"Here is the profile of {character}:\n{character_profile}", f"Your profile is: \n{character_profile}", f"Here is some information about {character}:\n{character_profile}", f"The background of {character} is as follows:\n{character_profile}"],
-			"current_scenario": [f"The current scenario is:\n{conversation['scenario']}", f"Current scenario:\n{conversation['scenario']}", f"The situation you are in is:\n{conversation['scenario']}", f"Here is the situation you are in:\n{conversation['scenario']}"],
-			"current_scenario_with_plot_summary": [f"The current scenario and its background are:\nBackground: {plot['summary']}\nCurrently: {conversation['scenario']}", f"Current scenario and the background:\nScenario: {conversation['scenario']}\nMore Background: {plot['summary']}", f"The situation you are in is:\nStory arc summary: {plot['summary']}\nCurrent scenario: {conversation['scenario']}", f"Here is the situation you are in:\nSummary of relevant plots: {plot['summary']}\nScenario: {conversation['scenario']}"],
+			"current_scenario": [f"The current scenario is:\n{scenario}", f"Current scenario:\n{scenario}", f"The situation you are in is:\n{scenario}", f"Here is the situation you are in:\n{scenario}"],
+			"current_scenario_with_plot_summary": [f"The current scenario and its background are:\nBackground: {background}\nCurrently: {scenario}", f"Current scenario and the background:\nScenario: {scenario}\nMore Background: {background}", f"The situation you are in is:\nStory arc summary: {background}\nCurrent scenario: {scenario}", f"Here is the situation you are in:\nSummary of relevant plots: {background}\nScenario: {scenario}"],
 			"other_characters_profile": [f"Here is the your knowledge about the other characters:\n{other_character_profiles_str}", f"Information about other characters:\n{other_character_profiles_str}", f"The background of other characters is as follows:\n{other_character_profiles_str}"],
-			"thought": [f"Your thoughts are:\n{thought}", f"Your thoughts in this situation are:\n{thought}", f"Your inner thoughts are:\n{thought}", f"Your inner monologue is:\n{thought}", f"Your inner thoughts in the scenario are:\n{thought}"],
+			"thought": [f"Your thoughts are:\n{motivation}", f"Your thoughts in this situation are:\n{motivation}", f"Your inner thoughts are:\n{motivation}", f"Your inner monologue is:\n{motivation}", f"Your inner thoughts in the scenario are:\n{motivation}"],
 			"requirements": [output_format, "" if thoughtless else output_format],
 		},
 		"=": {
@@ -357,8 +367,12 @@ def get_character_prompt(book_name, character, character_profile, plot, conversa
 		if other_character_profiles_str:
 			system_prompt += random.choice(templates["natural"]["other_characters_profile"]) + "\n\n"
 
-		if thought:
+		if motivation:
 			system_prompt += random.choice(templates["natural"]["thought"]) + "\n\n"
+		
+		if add_rag:
+			system_prompt += "Relevant Background Information: \n{retrieved_knowledge}\n\n"
+
 		system_prompt += random.choice(templates["natural"]["requirements"]) + "\n\n"
 	else:
 		# Styled with decorators
@@ -374,12 +388,12 @@ def get_character_prompt(book_name, character, character_profile, plot, conversa
 			# Plot summary section
 			section_title = random.choice(templates["pieces"]["plot_summary"])
 			system_prompt += decorator.format(section_title) + "\n"
-			system_prompt += plot['summary'] + "\n\n"
+			system_prompt += background + "\n\n"
 
 		# Current scenario section
 		section_title = random.choice(templates["pieces"]["current_scenario"])
 		system_prompt += decorator.format(section_title) + "\n"
-		system_prompt += f"{conversation['scenario']}\n\n"
+		system_prompt += f"{scenario}\n\n"
 
 		if other_character_profiles_str:
 			section_title = random.choice(templates["pieces"]["other_characters_profile"])
@@ -387,18 +401,23 @@ def get_character_prompt(book_name, character, character_profile, plot, conversa
 			system_prompt += other_character_profiles_str + "\n\n"
 
 		# Thought section (if not empty)
-		if thought:
+		if motivation:
 			section_title = random.choice(templates["pieces"]["thought"])
 			system_prompt += decorator.format(section_title) + "\n"
-			system_prompt += thought + "\n\n"
+			system_prompt += motivation + "\n\n"
 		
+		if add_rag:
+			section_title = "Relevant Background Information"
+			system_prompt += decorator.format(section_title) + "\n"
+			system_prompt += "{retrieved_knowledge}" + "\n\n"
+
 		# Requirements section (if not empty)
 		requirements = random.choice(templates["natural"]["requirements"])
 		if requirements:
 			section_title = random.choice(templates["pieces"]["requirements"])
 			system_prompt += decorator.format(section_title) + "\n"
 			system_prompt += requirements + "\n\n"
-	
+		
 
 	return system_prompt
 
@@ -484,7 +503,7 @@ def extract_json(text, **kwargs):
 {json_response}
 '''
 
-		response = get_response(model="claude-3-5-sonnet-20240620", messages=[{"role": "user", "content": prompt}])
+		response = get_response(model=kwargs['model'], messages=[{"role": "user", "content": prompt}])
 
 		logger.info(f'fixed json: {response}')	
 
@@ -514,8 +533,9 @@ Output only the corrected JSON string, without any additional explanations or co
 		return response
 
 	def _extract_json(text):
-		orig_text = text
 		# Use regular expressions to find all content within curly braces
+		orig_text = text
+
 		text = re.sub(r'"([^"\\]*(\\.[^"\\]*)*)"', lambda m: m.group().replace('\n', r'\\n'), text) 
 		
 		#json_objects = re.findall(r'(\{[^{}]*\}|\[[^\[\]]*\])', text, re.DOTALL)
@@ -546,10 +566,7 @@ Output only the corrected JSON string, without any additional explanations or co
 		if extracted_json:
 			return extracted_json
 		else:
-			logger.error(f'Error parsing response: {orig_text}')
-		
-			global count_error
-			count_error += 1
+			logger.error('Error parsing response: ', orig_text)
 			return None
 
 	# an inserted workflow for post processing in restore_from_cache
@@ -668,8 +685,7 @@ def read_json(file_path: str) -> List[Dict]:
 	
 if __name__ == '__main__':
 	messages = [{"role": "system", "content": "Hello, how are you? Hello, how are you? Hello, how are you?"}]
-	model = "claude-3-5-sonnet-20240620"
-	#model = 'gpt-4o'
+	model = 'gpt-4o'
 
 	print(get_response(model, messages))
 		

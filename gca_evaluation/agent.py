@@ -10,8 +10,7 @@ from langchain_community.vectorstores import FAISS
 from langchain.schema import Document
 from langchain.text_splitter import RecursiveCharacterTextSplitter, CharacterTextSplitter
 
-from utils import setup_logger, config
-logger = setup_logger(__name__, 'agent.log')
+from utils import logger, config
 
 ENVIRONMENT = "Environment"
 NSP = "NSP"

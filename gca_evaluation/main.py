@@ -507,7 +507,7 @@ if __name__ == "__main__":
         if args.continue_from > 0: exp_name += f'-continue_from={args.continue_from}'    
         if nth_exp > 0: exp_name += f'-repeat={nth_exp}'
         
-        logger = setup_logger(__name__, './' + exp_name + '.log')
+        logger = setup_logger(__name__, f'{__file__.split(".")[0]}-{exp_name}.log')
 
         # Initialize result storage
         all_cases = {} 
