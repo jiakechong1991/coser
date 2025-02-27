@@ -2,7 +2,12 @@
 
 Official Code for "CoSER: Coordinating LLM-Based Persona Simulation of Established Roles"
 
-We are uploading the complete dataset and models. Please access our dataset from Huggingface: https://huggingface.co/datasets/Neph0s/CoSER.
+We are excited to announce that our dataset and models are now publicly available on Huggingface:
+
+- Dataset: [CoSER Dataset](https://huggingface.co/datasets/Neph0s/CoSER)
+- Models:
+  - [CoSER-Llama-3.1-70B](https://huggingface.co/Neph0s/CoSER-Llama-3.1-70B)
+  - [CoSER-Llama-3.1-8B](https://huggingface.co/Neph0s/CoSER-Llama-3.1-8B)
 
 For reference, we have provided example files in the following directories:
 - `data/`: Sample data files showing the expected format and structure
@@ -20,7 +25,7 @@ Setup your api_key and base_url for LLMs, in config.json.
 
 ## Data 
 
-The complete dataset is currently undergoing internal review for safety concerns. We have provided some example data from *The Harry Potter series* and *A Song of Ice and Fire series* in the data/final/ directory.
+The complete dataset is available here: [CoSER Dataset](https://huggingface.co/datasets/Neph0s/CoSER). Besides, we provide some example data extracted from *The Harry Potter series* and *A Song of Ice and Fire series* in the data/final/ directory.
 
 ### Constructing Your Own Datasets
 
@@ -72,9 +77,13 @@ The script will generate:
 - Training data: `data/train/sft_sharegpt.json`
 - Test set: `data/test/test_set.json`
 
+## Training 
+
+We have provided [our SFT data in Sharegpt format](https://huggingface.co/datasets/Neph0s/CoSER/blob/main/train/sft_conversations_sharegpt.json). Alternatively, you can download [the full extracted data from 771 books in dataset](https://huggingface.co/datasets/Neph0s/CoSER/tree/main/full), and process it via data_construction/transform.py. For best results, we recommend mixing this with general-domain SFT data during training. You can use [llama_factory](https://github.com/hiyouga/LLaMA-Factory) for supervised fine-tuning.
+
 ## Evaluation 
 
-To evaluate an LLM' role-playing performance via Given-Circumtance Acting (GCA):
+To evaluate an LLM' role-playing performance via Given-Circumtance Acting (GCA) on [CoSER Test](https://github.com/Neph0s/CoSER/blob/main/data/test/test_set.json):
 
 ```bash
 python gca_evaluation/main.py --test_file data/test/test_set.json --actor_model gpt-4o --judge_model gpt-4o
