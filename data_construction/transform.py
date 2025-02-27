@@ -544,7 +544,7 @@ def to_test_circumstance(test_plots, n_samples=100, tag=''):
         # Check if we can add this sample
         book_counts.setdefault(book_name, 0) 
 
-        if sample in selected_samples or book_counts[book_name] >= 5:
+        if sample in selected_samples: #or book_counts[book_name] >= 5:
             continue
         
         book_counts[book_name] += 1
@@ -576,7 +576,7 @@ def to_test_circumstance(test_plots, n_samples=100, tag=''):
         conversation['plot'] = plot
         conversation['character_profiles'] = { c: test_plots[book_name]['character_profiles'][c] for c in conversation['major_characters'] }
         conversation['book'] = book_name
-        conversation['i_p'] = i
+        conversation['i_p'] = plot['i_p']
         conversation['i_c'] = j
         conversation['tag'] = tag
 
