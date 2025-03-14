@@ -9,6 +9,8 @@ We are excited to announce that our dataset and models are now publicly availabl
   - [CoSER-Llama-3.1-70B](https://huggingface.co/Neph0s/CoSER-Llama-3.1-70B)
   - [CoSER-Llama-3.1-8B](https://huggingface.co/Neph0s/CoSER-Llama-3.1-8B)
 
+You can search for your favorite book characters, browse their character data, and chat with their role-playing agents on our [website](https://ch.rhineai.com/characters).
+
 For reference, we have provided example files in the following directories:
 - `data/`: Sample data files showing the expected format and structure
 - `exp/`: Example simulation and evaluation results from our experiments
