@@ -36,11 +36,11 @@ Setup your api_key and base_url for LLMs, in config.json.
 
 ## Chat with CoSER Models
 
-We provide an example code (chat.py) that demonstrates how to chat with CoSER models. CoSER models effectively role-play various personas/characters, and accept system prompts in all kinds of formats. However, we strongly recomment activating inner thoughts for LLMs by adding the following prompts:
+We provide an example code (chat.py) that demonstrates how to chat with CoSER models. CoSER models effectively role-play various personas/characters, and accept system prompts in all kinds of formats. However, we strongly recommend activating inner thoughts for LLMs by adding the following prompts:
 
 > Use [your thought] for thoughts, which others can't see. Use (your action) for actions, which others can see. 
 
-Here are two example cases of CoSER models role-play:
+Here are two example cases of CoSER-8B:
 
 ### Case 1: Book Character
 
