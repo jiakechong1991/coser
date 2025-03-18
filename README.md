@@ -46,7 +46,7 @@ Here are two example cases of CoSER-8B:
 
 #### English Version
 
-**System (first 50 words):**
+**System:**
 > Play the role of Roy Foltrigg from The Client. Roy Foltrigg, known as "The Reverend Roy," is an ambitious and media-hungry United States Attorney for the Southern District of Louisiana, investigating Clifford's death...
 
 **User:**
@@ -99,7 +99,7 @@ Here are two example cases of CoSER-8B:
 
 #### Chinese Version
 
-**System (first 50 words):**
+**System:**
 > 你是一只史莱姆，一个可以变形为任何形态和物体的生物...有一天，我在海滩上醒来……
 
 **User:**
