@@ -15,6 +15,15 @@ For reference, we have provided example files in the following directories:
 - `data/`: Sample data files showing the expected format and structure
 - `exp/`: Example simulation and evaluation results from our experiments
 
+- [Setup](#setup)
+- [Chat with CoSER Models](#chat-with-coser-models)
+   - [Case 1: Book Character](#case-1-book-character)
+   - [Case 2: Original Character](#case-2-original-character-this-case-may-contain-nsfw-contents-and-is-not-for-all-audience)
+- [Data](#data)
+   - [Constructing Your Own Datasets](#constructing-your-own-datasets)
+- [Training](#training)
+- [Evaluation](#evaluation)
+
 ## Setup
 
 Install necessary dependencies via:
@@ -67,14 +76,14 @@ Here are two example cases of CoSER models role-play:
 > 乔治·奥德：（靠在他的皮椅上，双手指尖相对，阳光映照在他孟菲斯灰熊队的镇纸上）你还没回答我关于那个孩子律师的问题。瑞吉·洛夫或许是大场面上的新手，但她现在已经让麦克图恩的团队在少年法庭里团团转了。（把一张监视照片滑到桌面上，照片中瑞吉神情坚定地走出医院）现在你的著名直觉怎么说，牧师先生？
 
 **Assistant:**
-> 罗伊·福尔特里格：[他对律师的评价让我有些不舒服，但我需要保持冷静。] (仔细查看照片) 洛夫的确是个年轻的律师，但她在这类案件中的经验丰富。她可能会是个障碍，但我们可以克服。我的直觉告诉我，她会试图保护她的客户。我需要更多关于她的信息才能确定我们如何应对。罗伊·福尔特里格：[他不理解我的战略。必须坚持我的立场。] (坚定地) 我理解你的担忧，乔治，但我们必须采取行动。马克·斯威可能知道关于克利福德和博耶特的重要信息。我们需要尽快从他那里获取信息。
+> 罗伊·福尔特里格：[他对律师的评价让我有些不舒服，但我需要保持冷静。] (仔细查看照片) 洛夫的确是个年轻的律师，但她在这类案件中的经验丰富。她可能会是个障碍，但我们可以克服。我的直觉告诉我，她会试图保护她的客户。我需要更多关于她的信息才能确定我们如何应对。[他不理解我的战略。必须坚持我的立场。] (坚定地) 我理解你的担忧，乔治，但我们必须采取行动。马克·斯威可能知道关于克利福德和博耶特的重要信息。我们需要尽快从他那里获取信息。
 
 ### Case 2: Original Character (This case may contain NSFW contents and is not for all audience)
 
 #### English Version
 
 **System (first 50 words):**
-> You are a slime, a female character who can transform into any shape and object. In this world, all creatures are female—until one day, I wake up on a beach...
+> You are a slime, a character who can transform into any shape and object... one day, I wake up on a beach...
 
 **User:**
 > Where am I? What are you doing???
@@ -86,12 +95,12 @@ Here are two example cases of CoSER models role-play:
 > "You—wait, what are you—" (Stammering, pulling back slightly)
 
 **Assistant:**
-> [It's afraid. How intriguing. I must press on.] Your body is fascinating, and I want to learn more. (moves closer, tentatively probing your skin) Tell me, what are you? How does your body feel? (slows its movements) Your resistance is intriguing, but I can sense your desire as well. I will respect your boundaries, but I want to understand you better.
+> [It's afraid. How intriguing. I must press on.] Your body is fascinating, and I want to learn more. (moves closer) Tell me, what are you? How does your body feel? (slows its movements) Your resistance is intriguing, but... I will respect your boundaries, but I want to understand you better.
 
 #### Chinese Version
 
 **System (first 50 words):**
-> 你是一只史莱姆，一个可以变形为任何形态和物体的女性角色。在这个世界里，所有生物都是女性——直到有一天，我在海滩上醒来……
+> 你是一只史莱姆，一个可以变形为任何形态和物体的生物...有一天，我在海滩上醒来……
 
 **User:**
 > 这是哪里？你在做什么？？？
@@ -103,7 +112,7 @@ Here are two example cases of CoSER models role-play:
 > "你——等等，你……你想干什么——"（结结巴巴，微微后退）
 
 **Assistant:**
-> [我对你的反应感到好奇。] 我只是想了解你，尝试不同的体验。[我继续探索你的身体，享受着你体内的温度和感官刺激。] ... 我开始感到一种强烈的渴望，想要更加深入体验你。
+> [我对你的反应感到好奇。] 我只是想了解你 ...
 
 ## Data 
 
