@@ -2,19 +2,19 @@ from transformers import AutoModelForCausalLM, AutoTokenizer
 import torch
 
 # Specify local model path
-model_path = "Neph0s/CoSER-Llama-3.1-8B"
+model_path = "Neph0s/CoSER-Llama-3.1-70B"
 
 # Load local model
 model = AutoModelForCausalLM.from_pretrained(
     model_path,
-    #torch_dtype=torch.float16,  # Use float16 for large models to reduce memory usage
-    #device_map="auto"  # Automatically allocate device (CPU/GPU)
+    torch_dtype=torch.float16,  # Use float16 for large models to reduce memory usage
+    device_map="auto"  # Automatically allocate device (CPU/GPU)
 )
 
 # Load local tokenizer
 tokenizer = AutoTokenizer.from_pretrained(model_path)
 
-def chat_with_model(system_prompt, max_turns=5, max_new_tokens=128):
+def chat_with_model(max_turns=5, max_new_tokens=128):
     system_prompt = input("System Prompt for Roleplay: ")
 
     messages = [{"role": "system", "content": system_prompt}]
