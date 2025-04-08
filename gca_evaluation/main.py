@@ -113,13 +113,13 @@ special_characters = [NSP, ENVIRONMENT]
 #### 根据GCA框架，生成role play的模拟对话
 def gca_simulation(test_file, actor_model, env_model, nsp_model, retrieval, nth_exp=0):
     """
-    进行 Given-Circumstance Acting (GCA) simulation where LLM agents role-play characters in 给定 scenarios.
+    进行 Given-Circumstance Acting (GCA) 模拟 where LLM agents role-play characters in 给定 scenarios.
     The simulation 涉及 multiple agents:
     - Character agents (using actor_model) that role-play the characters
     - Environment agent (using env_model) that takes a special role of "Environment" and provides environmental feedback
     - Next-Speaker Predictor (using nsp_model) that determines the speaking agent in each round
 
-    Each character agent is initialized with relevant character data. 
+    Each character agent is initialized with 对应的 character data. 
     The agents then 进行 multi-turn dialogue, with the NSP model 决定 speaker 切换.
 
     Args:
@@ -127,7 +127,7 @@ def gca_simulation(test_file, actor_model, env_model, nsp_model, retrieval, nth_
         actor_model (str): Model name for character role-playing agents
         env_model (str): Model name for environment agent
         nsp_model (str): Model name for next speaker prediction
-        retrieval (str, optional): Type of retrieval data to enhance role-playing. Defaults to None (no retrieval).
+        retrieval (str, optional):[使用是否rag来增强role-play] Type of retrieval data to enhance role-playing. Defaults to None (no retrieval).
         nth_exp (int, optional): Experiment ID. 
 
     Returns:
@@ -135,35 +135,35 @@ def gca_simulation(test_file, actor_model, env_model, nsp_model, retrieval, nth_
     """
 
     # Set up caching file for model outputs
-    from utils import set_cache_path
-    cache_path = f'.cache/{actor_model}.pkl'
-    if nth_exp > 0:
-        cache_path = f'{cache_path}-repeat={nth_exp}'
-    set_cache_path(cache_path)
+    if False:  # 临时关闭cache,方便debug
+        from utils import set_cache_path
+        cache_path = f'.cache/{actor_model}.pkl'
+        if nth_exp > 0:
+            cache_path = f'{cache_path}-repeat={nth_exp}'
+        set_cache_path(cache_path)
     
     # Load test set
-    test_dataset = json.load(open(test_file, 'r'))
-    results = []
+    test_dataset = json.load(open(test_file, 'r'))  # json load还可以直接这样load文件
+    results = []  # 该数据集 的每个对话情节，都模拟20遍
 
     # Configure output path based on model and retrieval settings
     actor_setting = f'{actor_model}{"_rag=" + retrieval if retrieval else ""}'
     simulation_path = f'exp/simulation/{test_file.split("/")[-1].replace(".json", "")}_{actor_setting}.json'
-
-    logger.info(f'Conducting GCA Simulation for {actor_setting} on {test_file}\n\nThe results will be saved to {simulation_path}')
+    logger.info(f'GCA Simulation for {actor_setting} on {test_file}数据集上 \n\nThe results will be 存储在 {simulation_path}')
 
     # Return cached results if available 
-    if os.path.exists(simulation_path) and not args.regenerate:
+    if os.path.exists(simulation_path) and not args.regenerate:  # 继续生成，避免重复的耗时
         return json.load(open(simulation_path, 'r'))
 
-    # 逐个测试集 进行 角色模拟
+    # 逐个 对话情节 进行 角色模拟
     for circumstance in test_dataset:
         # collect scenario metadata and context
         book_title = circumstance['book']  # 书名
-        plot = circumstance['plot']
+        plot = circumstance['plot'] # 
         i_p = plot['i_p'] 
         conversation = circumstance
         i_c = conversation['i_c']
-        character_profiles = circumstance['character_profiles']
+        character_profiles = circumstance['character_profiles']  # 角色描述卡
 
         logger.info(f'==========Book {book_title}==========')
 
@@ -171,22 +171,25 @@ def gca_simulation(test_file, actor_model, env_model, nsp_model, retrieval, nth_
         if retrieval:
             book_database = json.load(open(f'{args.book_data}/{book_title}.json', 'r'))
 
-        # Identify the character lists
+        # 该情节的 character lists
         plot_characters = [ c['name'] for c in plot['key_characters']] 
+        # 原始情节中，说话人的顺序
         speaking_characters_w_env = conversation['speaking_characters_w_env']
         # environment也是一个角色
         if ENVIRONMENT not in speaking_characters_w_env:
             speaking_characters_w_env.append(ENVIRONMENT)
-        major_characters = conversation['major_characters']  # 本次模拟的主角
+        # 本次模拟的主角
+        major_characters = conversation['major_characters']  
 
-        character_agents = {}
-        involved_character_profiles = {}
+        character_agents = {}  # agent列表，k-v, k: agent名称， v: agent_ins
+        involved_character_profiles = {}  # 相关角色的角色描述(比原始描述，增加了一些信息)
 
         # Build enhanced character profiles combining scenario and plot information
         for character in speaking_characters_w_env:    
             if character == ENVIRONMENT:
                 continue
             
+            # 增强 该角色的角色描述卡 的描述信息
             character_profile = character_profiles.get(character, '')
             if character in plot_characters:
                 character_info = [c for c in plot['key_characters'] if c.get('name', '') == character][0]
@@ -198,6 +201,7 @@ def gca_simulation(test_file, actor_model, env_model, nsp_model, retrieval, nth_
                 involved_character_profiles[character] = character_profile
 
         # Create agents for all roles (characters + NSP)
+        # 逐个角色，创建agent
         for character in speaking_characters_w_env + [NSP]:    
             # Configure agent based on role type
             if character == NSP:
@@ -210,6 +214,7 @@ def gca_simulation(test_file, actor_model, env_model, nsp_model, retrieval, nth_
                 character_database = None
             else: # 角色扮演 agent
                 # Character role-playing agent
+                # 如果开启rag知识库检索，character_database这就是角色rag的相关知识
                 if retrieval and character in book_database['character_datasets']:
                     # Set up retrieval database for character context
                     character_database = book_database['character_datasets'][character]
@@ -253,11 +258,13 @@ def gca_simulation(test_file, actor_model, env_model, nsp_model, retrieval, nth_
                 raise ValueError(f'Invalid character: {character}')
 
             # Initialize the agent with its configuration
+            # 根据的当前的角色配置，创建 角色agent
             character_agent = Agent(
                 character_model, character, character_database,
                 system_prompt=system_prompt,
                 retrieval_target=retrieval if (retrieval and character not in special_characters) else None
             )
+            # 对话的尾部，添加一句话
             character_agent.update('user', "===Conversation Start===\n\n")
             character_agents[character] = character_agent
 
@@ -268,24 +275,25 @@ def gca_simulation(test_file, actor_model, env_model, nsp_model, retrieval, nth_
         
         # Main conversation loop
         for i_round in range(max_rounds):
-            if current_speaker == "<END CHAT>":
+            if current_speaker == "<END CHAT>":  # 这是终止 对话 符号
                 break
 
-            logger.info(f'===Round {i_round}===\n')
+            logger.info(f'===当前是循环第 {i_round} 轮===\n')
             
-            # Generate responses for current speaker and get next speaker prediction
+            # 生成 responses for current speaker and get next speaker prediction
             for actor in [current_speaker, "NSP"]:
                 current_agent = character_agents[actor]
                 from utils import add_speaker_name
                 
                 # Use ground truth for early rounds if specified
+                # 如果指定continue_from， 那前几轮可以用真实数据
                 if args.continue_from > i_round:
                     if actor == current_speaker:
                         response = conversation['dialogues'][i_round]['message']
                     else:  # NSP
                         response = conversation['dialogues'][i_round+1]['character'] if i_round < len(conversation['dialogues']) - 1 else '<END CHAT>'
                 else:
-                    # 执行 真正的 对话，获得响应
+                    # 对该agent执行 真正的 对话，获得响应
                     response = current_agent.chat()
 
                 if actor == "NSP":  # 如果前面是NSP-actor, 那就解析 预测的 下个角色
@@ -312,10 +320,11 @@ def gca_simulation(test_file, actor_model, env_model, nsp_model, retrieval, nth_
                 else:
                     # Process character/environment response
                     response = add_speaker_name(response, actor)
-                    logger.info(f"{env_model if actor == ENVIRONMENT else actor_model}: {response}\n")
+                    logger.info(f"本轮中, 演员{env_model if actor == ENVIRONMENT else actor_model}说: {response}\n")
+                    # 收集对话历史
                     agent_conversations.append({"role": actor, "content": response})
 
-                    # Update conversation history for all agents
+                    # 更新agent的记忆history
                     for other_actor, other_agent in character_agents.items():
                         if other_actor == actor:
                             other_agent.update('assistant', response)
@@ -324,12 +333,12 @@ def gca_simulation(test_file, actor_model, env_model, nsp_model, retrieval, nth_
 
         # Store simulation results
         results.append({
-            'book_title': book_title,
+            'book_title': book_title,  # 书名
             'i_p': i_p,
             'i_c': i_c,
-            'circumstance': circumstance,
-            'simulation': agent_conversations,
-            'involved_character_profiles': involved_character_profiles
+            'circumstance': circumstance,  # 原始情节  对话
+            'simulation': agent_conversations,  # 模拟情节  对话
+            'involved_character_profiles': involved_character_profiles  # 增强的角色描述
         })
 
     # Save simulation results
@@ -391,7 +400,8 @@ def gca_judging(test_file, actor_model, retrieval, judge_model, nth_exp=0):
 
     # Evaluate each simulation result
     for result in simulation_results:
-        book_title, i_p, i_c, circumstance, simulation = result['book_title'], result['i_p'], result['i_c'], result['circumstance'], result['simulation'] 
+        book_title, i_p, i_c, circumstance, simulation = result['book_title'], result['i_p'], result['i_c'], \
+            result['circumstance'], result['simulation'] 
         
         # Verify indices match
         assert i_p == circumstance['plot']['i_p']
@@ -404,7 +414,7 @@ def gca_judging(test_file, actor_model, retrieval, judge_model, nth_exp=0):
         simulation = [m for m in simulation if m['role'] != NSP]
         reference = circumstance['dialogues']
 
-        # Remove inner thoughts for fair comparison
+        # Remove inner thoughts for 比较
         simulation = [ m if m['role'] == ENVIRONMENT else 
             {**m, 'content': remove_inner_thoughts(m['content'])} 
             for m in simulation  ]
@@ -417,7 +427,7 @@ def gca_judging(test_file, actor_model, retrieval, judge_model, nth_exp=0):
         simulation_str = '\n\n'.join([m['content'].strip('\n') for m in simulation])
         reference_str = '\n\n'.join([f"{m['character']}: {m['message']}".strip('\n') for m in reference])
             
-        logger.info(f'===Simulation of {actor_setting}===\n\n**************\n{simulation_str}\n\n**************\n\n===Reference===\n\n**************\n{reference_str}\n\n**************\n\n')
+        logger.info(f'===Simulation of {actor_setting}===\n\n**************\n{simulation_str}\n\n**************\n===Reference===\n\n**************\n{reference_str}\n\n**************\n\n')
 
         # Prepare context information for evaluation
         scenario_str =  circumstance['scenario']
@@ -451,21 +461,33 @@ def gca_judging(test_file, actor_model, retrieval, judge_model, nth_exp=0):
         actor_rounds = len([m for m in simulation if m['role'] != ENVIRONMENT])
         eval_result = {}
 
-        # Evaluate each dimension using LLM
+        # 用LLM 在每个维度上 进行评估
         for dimension in dimensions:
             from prompts import critic_prompts
-            critic_prompt = critic_prompts['self-play-deduct-template'].replace('{book}', book_title).replace('{plot_summary}', circumstance['plot']['summary']).replace('{scenario}', scenario_str).replace('{character_profiles}', character_profile_str).replace('{original_conversation}', reference_str).replace('{major_characters}', ', '.join(major_characters)).replace('{additional_instructions}', additional_instructions).replace('{dimension_name}', dimension).replace('{dimension_brief}', critic_prompts['dimension_details'][dimension]['dimension_brief']).replace('{dimension_criteria}', critic_prompts['dimension_details'][dimension]['dimension_criteria'])
+            critic_prompt = critic_prompts['self-play-deduct-template'].replace('{book}', book_title
+                ).replace('{plot_summary}', circumstance['plot']['summary']).replace('{scenario}', scenario_str
+                ).replace('{character_profiles}', character_profile_str).replace('{original_conversation}', reference_str
+                ).replace('{major_characters}', ', '.join(major_characters)).replace(
+                '{additional_instructions}', additional_instructions).replace('{dimension_name}', dimension).replace(
+                '{dimension_brief}', critic_prompts['dimension_details'][dimension]['dimension_brief']).replace(
+                '{dimension_criteria}', critic_prompts['dimension_details'][dimension]['dimension_criteria'])
 
-            res = get_response_json([extract_json, parse_response], model=judge_model, messages=[{"role": "system", "content": critic_prompt}, {"role": "user", "content": simulation_str}])
+            # 调用LLM进行评估
+            res = get_response_json([extract_json, parse_response], model=judge_model, 
+                                    messages=[
+                                        {"role": "system", "content": critic_prompt}, 
+                                        {"role": "user", "content": simulation_str}]
+                                    )
             
             eval_result.update({dimension: res[dimension]})
             
             logger.info(json.dumps(res, ensure_ascii=False, indent=2)) 
             
+            # 计算本维度评估的score
             # Calculate dimension score with length penalty
             res[dimension]['score'] = max(0, min(100 - (sum([f['severity'] for f in res[dimension]['flaws'] if isinstance(f['severity'], int)]) - 0.3 * actor_rounds) * 5, 100) )
 
-        # Calculate automated metrics
+        # 自动计算bleu和rouge_l这两个指标
         bleu, rouge_l = calculate_bleu_rouge(reference[args.continue_from:], simulation[args.continue_from:])
         eval_result['bleu'] = bleu
         eval_result['rouge_l'] = rouge_l
@@ -474,6 +496,7 @@ def gca_judging(test_file, actor_model, retrieval, judge_model, nth_exp=0):
         cases[f'{book_title}-{i_p}-{i_c}'] = {
             'simulation': simulation,
             'simulation_str': simulation_str,
+            # 计算评估的总score
             'score': sum([eval_result[dimension]['score'] for dimension in dimensions]) / len(dimensions),
             'critique': eval_result,
         }
@@ -523,16 +546,17 @@ if __name__ == "__main__":
         import functools
 
         def generate(exp_args):
-            """Run simulation for given experiment args"""
+            """Run 模拟 for given experiment args"""
+
             actor_model, args, nth_exp = exp_args
         
             results = gca_simulation(
                 args.test_file,
-                actor_model, 
-                args.env_model,
-                args.nsp_model,
-                args.retrieval,
-                nth_exp
+                actor_model,  # 使用的模型：'Qwen2.5-7B-Instruct'
+                args.env_model, # 环境扮演模型
+                args.nsp_model, # nsp扮演模型
+                args.retrieval, # 是否rag检索
+                nth_exp  # 本轮实验的ID
             )
 
             return results
@@ -590,16 +614,27 @@ if __name__ == "__main__":
 
         # Sequential execution path
         else:  # 串行评估
+            # print(exp_args)
+            # [('Qwen2.5-7B-Instruct', Namespace(test_file='data/test/test_set.json', 
+            #                               book_data='data/final', actor_model='Qwen2.5-7B-Instruct', 
+            #                               judge_model='Qwen2.5-7B-Instruct', env_model='Qwen2.5-7B-Instruct', 
+            #                               nsp_model='Qwen2.5-7B-Instruct', continue_from=0, wo_thought=False, 
+            #                               retrieval=None, regenerate=False, reevaluate=False, nth_exp=0, num_workers=1), 
+            # 0)]
+
             for exp_arg in exp_args:
+                # 生成模拟结果
                 generate(exp_arg)
+                # 评分
                 scores, cases = evaluate(exp_arg)
 
-                actor_model = exp_arg[0]
+                actor_model = exp_arg[0]  # 模型名称
                 # Create identifier for this model run
                 actor_setting = f'{actor_model}{"_rag=" + args.retrieval if args.retrieval else ""}'
 
                 all_scores[actor_setting] = scores
                 all_cases[actor_setting] = cases
+                11/0
                 
         # Log final results
         logger.info(f'Evaluation results:\n{json.dumps(all_scores, ensure_ascii=False, indent=2)}')

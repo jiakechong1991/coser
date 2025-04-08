@@ -440,7 +440,7 @@ class Agent:
     
     def update(self, role: str, message: str):
         """
-        Updates the conversation history with a new message.
+        更新 the conversation history with a new message.
         
         Args:
             role (str): Role of the message sender
