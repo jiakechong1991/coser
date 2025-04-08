@@ -230,7 +230,7 @@ def get_response(model, messages, nth_generation=0, **kwargs):
 
 	except Exception as e:
 		import traceback 
-		logger.error(f'Prompt: {messages[:500]}')
+		logger.error(f'LLM请求失败, Prompt: {messages[:500]}')
 		logger.error(f"Error in get_response: {str(e)}")
 
 		try:
@@ -613,9 +613,9 @@ def get_response_json(post_processing_funcs=[extract_json], **kwargs):
     secondary_response = None  # Store backup response for parsing failures
 
     while True:
-        logger.info(f'{nth_generation}th generation')
+        logger.info(f'第{nth_generation}th generation')
         response = get_response(**kwargs, nth_generation=nth_generation)
-        logger.info(f'response by LLM: {response}')
+        #logger.info(f'response by LLM: {response}')
 
         if response is None:
             continue
