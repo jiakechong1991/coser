@@ -65,6 +65,7 @@ for item_file in file_list:
             f_out.write(content)
 
 print("输出文件:{a}".format(a=output_file))
+print("这些被处理后的小说，可能还有特异的字符，还需要批量进行检查")
 print("合并完成， 一共处理{a}个文件, 共计{b}行".format(a=len(file_list), b=all_line_num))
 
 
