@@ -13,6 +13,8 @@ random.seed(42)
 
 logger = None
 
+default_model = "Qwen2.5-7B-Instruct"
+
 # Set up command line argument parser
 parser = argparse.ArgumentParser(
     description='Evaluate role-playing language models via given-circumstance acting (GCA)'
@@ -34,27 +36,27 @@ parser.add_argument(
 
 # Model configuration
 parser.add_argument(
-    '--actor_model',
+    '--actor_model',  # role play模型
     type=str,
-    default='gpt-4o',
+    default=default_model,
     help='Name of the model to use for role-playing'
 )
 parser.add_argument(
-    '--judge_model',
+    '--judge_model',  # LLM评分模型
     type=str,
-    default='gpt-4o',
+    default=default_model,
     help='Name of the model to use for LLM judging'
 )
 parser.add_argument(
-    '--env_model',
+    '--env_model',  # 环境反馈模型
     type=str,
-    default='gpt-4o',
+    default=default_model,
     help='Name of the model to use for environment response'
 )
 parser.add_argument(
-    '--nsp_model',
+    '--nsp_model',  # NSP模型
     type=str,
-    default='gpt-4o-mini',
+    default=default_model,
     help='Name of the model to use for next-speaker prediction, default to gpt-4o-mini, but recommend Coser-70B or self-deployed models for better cost-efficiency.'
 )
 
@@ -108,16 +110,17 @@ ENVIRONMENT = 'Environment'
 NSP = "NSP"
 special_characters = [NSP, ENVIRONMENT]
 
+#### 根据GCA框架，生成role play的模拟对话
 def gca_simulation(test_file, actor_model, env_model, nsp_model, retrieval, nth_exp=0):
     """
-    Conducts Given-Circumstance Acting (GCA) simulation where LLM agents role-play characters in specific scenarios.
-    The simulation involves multiple agents:
+    进行 Given-Circumstance Acting (GCA) simulation where LLM agents role-play characters in 给定 scenarios.
+    The simulation 涉及 multiple agents:
     - Character agents (using actor_model) that role-play the characters
     - Environment agent (using env_model) that takes a special role of "Environment" and provides environmental feedback
     - Next-Speaker Predictor (using nsp_model) that determines the speaking agent in each round
 
     Each character agent is initialized with relevant character data. 
-    The agents then engage in multi-turn dialogue, with the NSP model directing speaker transitions.
+    The agents then 进行 multi-turn dialogue, with the NSP model 决定 speaker 切换.
 
     Args:
         test_file (str): Path to JSON file containing test cases.
@@ -152,10 +155,10 @@ def gca_simulation(test_file, actor_model, env_model, nsp_model, retrieval, nth_
     if os.path.exists(simulation_path) and not args.regenerate:
         return json.load(open(simulation_path, 'r'))
 
-    # Traverse each test sample in the test dataset
+    # 逐个测试集 进行 角色模拟
     for circumstance in test_dataset:
         # collect scenario metadata and context
-        book_title = circumstance['book']
+        book_title = circumstance['book']  # 书名
         plot = circumstance['plot']
         i_p = plot['i_p'] 
         conversation = circumstance
@@ -171,9 +174,10 @@ def gca_simulation(test_file, actor_model, env_model, nsp_model, retrieval, nth_
         # Identify the character lists
         plot_characters = [ c['name'] for c in plot['key_characters']] 
         speaking_characters_w_env = conversation['speaking_characters_w_env']
+        # environment也是一个角色
         if ENVIRONMENT not in speaking_characters_w_env:
             speaking_characters_w_env.append(ENVIRONMENT)
-        major_characters = conversation['major_characters']
+        major_characters = conversation['major_characters']  # 本次模拟的主角
 
         character_agents = {}
         involved_character_profiles = {}
@@ -204,7 +208,7 @@ def gca_simulation(test_file, actor_model, env_model, nsp_model, retrieval, nth_
                 # Environment description agent
                 system_prompt = get_environment_prompt(major_characters, conversation['scenario'])
                 character_database = None
-            else:
+            else: # 角色扮演 agent
                 # Character role-playing agent
                 if retrieval and character in book_database['character_datasets']:
                     # Set up retrieval database for character context
@@ -229,6 +233,7 @@ def gca_simulation(test_file, actor_model, env_model, nsp_model, retrieval, nth_
 
                 # Configure prompt based on model type
                 add_output_example = False if 'coser' in actor_model.lower() else True
+                # 生成 system_prompt提示词
                 system_prompt = get_character_prompt(
                     book_title, character, character_profile, plot["summary"],
                     conversation["scenario"], motivation, thoughtless=args.wo_thought,
@@ -237,7 +242,7 @@ def gca_simulation(test_file, actor_model, env_model, nsp_model, retrieval, nth_
                     add_output_example=add_output_example, add_rag=retrieval
                 )
 
-            # Select appropriate model for the agent
+            # Select 对应的 model for the agent
             if character not in special_characters:
                 character_model = actor_model  # Character role-playing
             elif character == ENVIRONMENT:
@@ -280,9 +285,10 @@ def gca_simulation(test_file, actor_model, env_model, nsp_model, retrieval, nth_
                     else:  # NSP
                         response = conversation['dialogues'][i_round+1]['character'] if i_round < len(conversation['dialogues']) - 1 else '<END CHAT>'
                 else:
+                    # 执行 真正的 对话，获得响应
                     response = current_agent.chat()
 
-                if actor == "NSP":
+                if actor == "NSP":  # 如果前面是NSP-actor, 那就解析 预测的 下个角色
                     # Process next speaker prediction
                     next_actor = response.split(':')[0].strip() if ':' in response else response
 
@@ -494,7 +500,7 @@ def gca_judging(test_file, actor_model, retrieval, judge_model, nth_exp=0):
 
 if __name__ == "__main__":
 
-    if args.nth_exp >= 0:
+    if args.nth_exp > 0:  # 一共评估N次
         nth_exps = [args.nth_exp]
     else:
         repeat_times = 3
@@ -551,6 +557,7 @@ if __name__ == "__main__":
         # Create experiment args for each actor model
         exp_args = [(actor_model, args, nth_exp) for actor_model in actor_models]
 
+        # 并行评估
         # Parallel execution path when multiple workers available
         if args.num_workers > 1 and len(exp_args) > 1:
             # First run all generate tasks simultaneously
@@ -582,7 +589,7 @@ if __name__ == "__main__":
                     all_cases[actor_setting] = cases
 
         # Sequential execution path
-        else:
+        else:  # 串行评估
             for exp_arg in exp_args:
                 generate(exp_arg)
                 scores, cases = evaluate(exp_arg)

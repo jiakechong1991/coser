@@ -21,15 +21,7 @@ import json
 import re
 import copy
 
-parser = argparse.ArgumentParser(description='Convert data format')
-parser.add_argument('--dir', type=str, default='data', help='input_dir path for both input and output')
-args = parser.parse_args()
-
-input_dir = args.dir + '/final/'
-
-# Get a list of all files in the input_dir
-files = [f for f in os.listdir(input_dir) if os.path.isfile(os.path.join(input_dir, f))]
-
+######function
 def stable_shuffle(files):
     """
     Performs a deterministic shuffle of file names using a custom hash function.
@@ -73,18 +65,6 @@ def stable_shuffle(files):
     
     # Extract and return just the filenames in their new order
     return [file_hash_pair[0] for file_hash_pair in files_with_hash]
-
-# Shuffle the files in a stable way
-files = stable_shuffle(files)
-
-# Print first 10 files and their total count
-print(f"First 10 files: {files[:10]}")
-print(f"Total number of files: {len(files)}")
-
-dedup = False
-
-ENVIRONMENT = 'Environment'
-NSP = 'NSP'
 
 def process(file):
     """
@@ -443,42 +423,6 @@ def process(file):
 
     return train_chat_data, held_out_plots, character_profiles
 
-
-# Process each file
-n_books = len(files)
-
-train_chat_data = []
-held_out_plots_id_books = {}
-held_out_plots_ood_books = {}
-
-
-for i_b, file in enumerate(files):
-    book_name = os.path.splitext(file)[0]
-    train_chat_data_book,  test_plots_book, character_profiles_book = process(file)
-
-    if i_b < n_books * 0.9: #and not ('A Song of Ice and Fire' in book_name) : # The training set excludes the GOT data 
-        train_chat_data += train_chat_data_book
-
-        held_out_plots_id_books[book_name] = {
-            "character_profiles": character_profiles_book,
-            "plots": test_plots_book,
-        }
-    else:
-        held_out_plots_ood_books[book_name] = {
-            "character_profiles": character_profiles_book,
-            "plots": test_plots_book,
-        }
-    
-# print key statistics of the datasets
-print(f"n_books: {n_books}")
-print(f"train_chat_data: {len(train_chat_data)}")
-
-
-random.shuffle(train_chat_data)
-
-os.makedirs(args.dir + '/train', exist_ok=True)
-os.makedirs(args.dir + '/test', exist_ok=True)
-
 # Save the chat data in the sharegpt format
 def to_sharegpt_format(chat_data):
     results = []
@@ -496,11 +440,6 @@ def to_sharegpt_format(chat_data):
             })
         results.append({"conversations": conversation})
     return results
-
-with open(args.dir + '/train/sft_sharegpt.json', 'w', encoding='utf-8') as f:
-    sharegpt_format_data = to_sharegpt_format(train_chat_data)
-    json.dump(sharegpt_format_data, f, ensure_ascii=False, indent=2)
-
 
 def to_test_circumstance(test_plots, n_samples=100, tag=''):
     samples = []
@@ -585,6 +524,76 @@ def to_test_circumstance(test_plots, n_samples=100, tag=''):
 
     return sampled_conversations
 
+###########主程序############
+"""
+这是一段纯规则的文本处理逻辑，用于将原始数据转换为ShareGPT格式，并生成测试集和训练集。具体步骤如下：
+"""
+parser = argparse.ArgumentParser(description='Convert data format')
+parser.add_argument('--dir', type=str, default='data', help='input_dir path for both input and output')
+args = parser.parse_args()
+
+input_dir = args.dir + '/final/'
+
+# Get a list of all files in the input_dir
+files = [f for f in os.listdir(input_dir) if os.path.isfile(os.path.join(input_dir, f))]
+
+# Shuffle the files in a stable way
+files = stable_shuffle(files)
+
+# Print first 10 files and their total count
+print(f"First 10 files: {files[:10]}")
+print(f"Total number of files: {len(files)}")
+
+dedup = False
+
+ENVIRONMENT = 'Environment'
+NSP = 'NSP'
+
+
+# Process each file
+n_books = len(files)
+
+train_chat_data = []
+held_out_plots_id_books = {}
+held_out_plots_ood_books = {}
+
+
+### 逐个book进行处理
+for i_b, file in enumerate(files):
+    book_name = os.path.splitext(file)[0]
+    train_chat_data_book,  test_plots_book, character_profiles_book = process(file)
+
+    if i_b < n_books * 0.9: #and not ('A Song of Ice and Fire' in book_name) : # The training set excludes the GOT data 
+        train_chat_data += train_chat_data_book
+
+        held_out_plots_id_books[book_name] = {
+            "character_profiles": character_profiles_book,
+            "plots": test_plots_book,
+        }
+    else:
+        held_out_plots_ood_books[book_name] = {
+            "character_profiles": character_profiles_book,
+            "plots": test_plots_book,
+        }
+    
+# print key statistics of the datasets
+print(f"n_books: {n_books}")
+print(f"train_chat_data: {len(train_chat_data)}")
+
+
+print("开始执行shuffle")
+random.shuffle(train_chat_data)
+
+os.makedirs(args.dir + '/train', exist_ok=True)
+os.makedirs(args.dir + '/test', exist_ok=True)
+
+with open(args.dir + '/train/sft_sharegpt.json', 'w', encoding='utf-8') as f:
+    sharegpt_format_data = to_sharegpt_format(train_chat_data)
+    json.dump(sharegpt_format_data, f, ensure_ascii=False, indent=2)
+
+
+
+print("开始保存out数据")
 # Save the test plots
 with open(args.dir + '/test/held_out_plots.json', 'w', encoding='utf-8') as f:
     json.dump({'id': held_out_plots_id_books, 'ood': held_out_plots_ood_books}, f, ensure_ascii=False, indent=2)
