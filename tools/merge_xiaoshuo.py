@@ -1,11 +1,13 @@
 # -*- coding:utf-8 -*-
 import os
+import json
 
 """列出指定目录下的txt文件，按照安装顺序进行合并，合并后保存到指定文件中"""
 
 xiaoshuo_name = "fanren"
 input_dir = "./data/my_data/source/{name}".format(name=xiaoshuo_name)
 output_file = "data/my_data/source/{name}/{name}_merge.txt".format(name=xiaoshuo_name)
+output_json = "data/my_data/source/{name}/{name}_merge.jsonl".format(name=xiaoshuo_name)
 
 #如果输出文件存在，则删除
 if os.path.exists(output_file):
@@ -69,6 +71,21 @@ print("这些被处理后的小说，可能还有特异的字符，还需要批�
 print("合并完成， 一共处理{a}个文件, 共计{b}行".format(a=len(file_list), b=all_line_num))
 
 
+all_lines = []
+with open(output_file, "r", encoding="utf-8") as f:
+    for item_line in f:
+        # print(item_line.strip())
+        all_lines.append(item_line)
+
+out_res = {
+    "title": "凡人修仙传",
+    "author": "忘语",
+    "content": "".join(all_lines),
+}
+
+with open(output_json, "w", encoding="utf-8") as f:
+    f.write(json.dumps(out_res, ensure_ascii=False, indent=4))
+print("已经合并成jsonl文件: {a}".format(a=output_json))
 
 
 
