@@ -56,7 +56,7 @@ def find_index(lst, key):
     except ValueError:
         return -1
 
-@cached
+#@cached
 def create_chunk_generator(book, chunk_size):
     """ 这是基于规则进行 chunk切分的
     Generates chunks of text from a book while respecting token limits and chapter boundaries.
@@ -82,6 +82,7 @@ def create_chunk_generator(book, chunk_size):
         return (tab_count / len(content)) > threshold
     
     if has_excessive_tabs(book['content']):  # 满足条件，清除 \t制表符号
+        print("制表符号过多，实施清除")
         book['content'] = book['content'].replace('\t', '')
 
     from split import split_book
@@ -90,7 +91,7 @@ def create_chunk_generator(book, chunk_size):
 
     results = []
 
-    # Case 1: No chapters detected - 使用固定 chunk-size 进行切分
+    # Case 1:按照章节法进行切分，如果失败，则 使用固定 chunk-size 进行切分
     if not chapters:
         # Convert text to tokens for more precise chunking
         tokens = encode(book['content'])
@@ -564,6 +565,7 @@ def extract(book, chunk_size=8192):  # 从book中提取信息
     # 对book进行chunk切分[按照章节/chunk-size] # 基于规则
     chunk_generator = create_chunk_generator(book, chunk_size)
     print("本书chunk切分完毕，一共{a}个chunk".format(a=len(chunk_generator)))
+    1111/0
     # Initialize results structure
     results = {
         'chapter_beginnings': [],
@@ -1270,15 +1272,18 @@ if __name__ == '__main__':
     os.makedirs(args.output_dir, exist_ok=True)
 
     # Read input data
-    with jsonlines.open(args.input, mode='r') as reader:
-        books_data = list(reader)
+    books_data = []
+    
+    with open(args.input, 'r', encoding='utf-8') as file:
+        data = json.load(file)  # 使用 json.load() 读取文件内容并解析为 Python 对象
+        books_data.append(data)
 
     # Clean book titles
     for book in books_data:
         # 有这些key: title, author , content, 
         book['title'] = book['title'].replace('/', '-').replace(':', '_').replace('.', ' ')
 
-    logger.info(f"Processing {len(books_data)} books")
+    logger.info(f"一共要处理{len(books_data)}本书")
 
     def process_book(book):
         """具体提取一本book"""
@@ -1308,6 +1313,7 @@ if __name__ == '__main__':
     else:  # 串行处理
         processed_books = []
         for book in tqdm(books_data):
+            # 处理一本书的流程
             processed_book = process_book(book)
             processed_books.append(processed_book)
 
