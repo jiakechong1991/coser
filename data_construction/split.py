@@ -31,10 +31,14 @@ def match_chapter_title(line_text):
         res["src"] = line_text
         res["match_ok"] = True
     else:
-        print("未匹配到内容")
+        # print("未匹配到内容")
+        pass
 
     return res
 
+"""
+
+"""
 
 def split_book(book: dict) -> list:
     """
@@ -49,7 +53,7 @@ def split_book(book: dict) -> list:
     content = book['content']
     
     #### 或者章节列表
-    chapters_titles = []
+    max_chapter_num = 100
     chapters_all = []
 
     one_temp_chapter_lines = []
@@ -65,11 +69,15 @@ def split_book(book: dict) -> list:
             if last_temp_chapter:
                 chapters_all.append(
                     {
-                        "chapter_src": last_temp_chapter["src"],  # 本文本行
-                        "chapter_title": last_temp_chapter["chapter_title"],
-                        "chapter_index": last_temp_chapter["chapter_index"],
-                        "chapter_contents": one_temp_chapter_lines # list。 每个元素一行
+                        "chapter_src": last_temp_chapter["src"],  # 章节的原始文本行
+                        "chapter_title": last_temp_chapter["chapter_title"],  # 章节名称
+                        "chapter_index": last_temp_chapter["chapter_index"],  # 章节序号
+                        "chapter_contents": one_temp_chapter_lines, # list。 章节中的每个行
+                        "chapter_tokens": len("".join(one_temp_chapter_lines))
                     })
+                # 调试功能： 仅仅提取前 max_chapter_num个章节
+                if len(chapters_all) >= max_chapter_num:
+                    break
             
             last_temp_chapter = temp_chapter
             one_temp_chapter_lines = []  # 先清空之前
@@ -81,9 +89,13 @@ def split_book(book: dict) -> list:
         print(i["chapter_src"])
     
     print("一共识别到{a}个章节".format(a=len(chapters_all)))
-    print(chapters_all[3])
-    1/0
+    print("如下是 第3个章节的示例：")
+    for i in range(3):
+        print("++++++"*8)
+        print(chapters_all[i])
     # 可以对 小/短 的章节进行合并
+
+    # 对较大章节，进行chunk-size方式的切分。然后章节分成 章节1, 章节2 这样的子章节
 
     return chapters_all
 
@@ -115,17 +127,12 @@ def split_book(book: dict) -> list:
     
 if __name__ == '__main__':
 
-    with jsonlines.open('data/src/books_example.jsonl', mode='r') as reader:
+    with jsonlines.open('data/src/fanren_merge.jsonl', mode='r') as reader:
         books_data = list(reader) 
 
     # Process all books
     split_books = [split_book(book) for book in books_data]
 
-    # Print the count 
-    print(f"Split {count_split_success} books, failed {count_split_failed} books")
-    # Update books_data with the processed books
-    books_data = split_books
-
-    print(f"Processed {len(books_data)} books, splitting their content into chapters.")
+    print(f"一共形成了 {len(split_books)} , splitting their content into chapters.")
 
     

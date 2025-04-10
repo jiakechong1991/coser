@@ -3,6 +3,5 @@
 ***/__pycache__/
 ***.log
 **cache.pkl
-data/my_data/
 ***.jsonl
 ***.txt

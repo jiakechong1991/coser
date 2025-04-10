@@ -58,7 +58,7 @@ def find_index(lst, key):
 
 #@cached
 def create_chunk_generator(book, chunk_size):
-    """ 这是基于规则进行 chunk切分的
+    """ 基于章节进行 chunk切分的
     Generates chunks of text from a book while respecting token limits and chapter boundaries.
 
     Args:
@@ -89,76 +89,7 @@ def create_chunk_generator(book, chunk_size):
     # 将一本书的完整content,按照章节进行 chunk切割
     chapters = split_book(book)
 
-    results = []
-
-    # Case 1:按照章节法进行切分，如果失败，则 使用固定 chunk-size 进行切分
-    if not chapters:
-        # Convert text to tokens for more precise chunking
-        tokens = encode(book['content'])
-        start_index = 0
-        
-        while start_index < len(tokens):
-            # Handle the last chunk which may be smaller than chunk_size
-            if len(tokens) - start_index <= chunk_size:
-                chunk = decode(tokens[start_index:])
-                results.append(chunk)
-                break
-            
-            # Create chunk of specified size and decode back to text
-            chunk_tokens = tokens[start_index:start_index + chunk_size]
-            chunk = decode(chunk_tokens)
-            results.append(chunk)
-            
-            start_index += len(chunk_tokens)
-    
-    # Case 2: Chapters detected - try to keep chapters together while respecting size limits
-    else:  # 对较大的章节，继续进行片段切分
-        current_chunk = []
-        current_tokens = 0
-        
-        for chapter in chapters:
-            # Add chapter to current chunk
-            current_chunk.append(chapter['content'])
-            current_tokens += len(encode(chapter['content']))
-            
-            # Check if current chunk has reached minimum size (chunk_size/2)
-            if current_tokens >= chunk_size // 2:
-                # If chunk is within acceptable size range (between chunk_size/2 and 2*chunk_size)
-                if current_tokens <= 2 * chunk_size:
-                    results.append(''.join(current_chunk))
-                    current_chunk = []
-                    current_tokens = 0
-                # If chunk is too large, split it into smaller pieces
-                else:
-                    chunk_text = ''.join(current_chunk)
-                    chunk_tokens = encode(chunk_text)
-                    for i in range(0, len(chunk_tokens), chunk_size):
-                        # Special handling for final piece to avoid tiny chunks
-                        if i + 2 * chunk_size >= len(chunk_tokens):
-                            results.append(decode(chunk_tokens[i:]))
-                            break
-                        else:
-                            results.append(decode(chunk_tokens[i:i + chunk_size]))
-                    current_chunk = []
-                    current_tokens = 0
-        
-        # Add any remaining content as final chunk
-        if current_chunk:
-            results.append(''.join(current_chunk))
-
-    # 清理不相关的文本， 例如版权标识等
-    lines = results[0].split('\n')
-    filtered_lines = []
-    copyright_words = ['rights', 'reserved', 'reproduced', 'copyright', 'reproduce', 'permission']
-    
-    # Remove lines that are likely copyright notices (short lines with multiple copyright-related words)
-    for line in lines:
-        words = line.split()
-        if len(words) < 50 and sum(word.lower() in copyright_words for word in words) > 1:
-            continue
-        filtered_lines.append(line)
-    
-    results[0] = '\n'.join(filtered_lines)
+    results = chapters
 
     return results
 
@@ -299,19 +230,18 @@ def find_best_match_sentence(chunk, target, threshold=0.6):
         return best_match
     else:
         return None
-def extract_from_chunk(book, i_c, chunk, truncated_plots=None):
+def extract_from_chunk(book, i_c, chunk:str, truncated_plots=None):
     """
-    Extract and process 情节 information from a chunk of book text.
+    提取 情节information from a chunk of book text.
     
-    This function analyzes a chunk of text to identify chapter beginnings, plots, conversations,
-    and other narrative elements. It uses an LLM to generate structured information about the text.
+    借助LLM 从章节片段中 提取  chapter beginnings, plots, conversations, and other narrative elements. 
+    
 
     Args:
         book (dict): Dictionary containing book metadata including title and author
         i_c (int): Chunk index
         chunk (str): Text content of the current chunk to analyze
-        truncated_plots[被截断的情节] (list, optional): List of incomplete[不完整的] plots from previous chunk that   
-            need to be finished
+        truncated_plots[被截断的情节] (list, optional): List of incomplete[不完整的] plots，因为先前chunk的情节还没结束
 
     Returns:
         tuple: Contains:
@@ -320,17 +250,20 @@ def extract_from_chunk(book, i_c, chunk, truncated_plots=None):
             - remaining_chunk (str): Unused portion of chunk to process in next iteration
             
     The function generates a detailed prompt for the LLM that requests:
-    1. Chapter beginning identification[识别]
-    2. Plot extraction and analysis
-    3. Conversation reconstruction
-    4. Character motivation analysis
-    5. Next chunk starting point determination[判定/决定]
+    1. Chapter beginning identification[识别] # 章节开始
+    2. Plot extraction and analysis  # 情节提取
+    3. Conversation reconstruction  # 对话重建
+    4. Character motivation analysis # 角色动机分析
+    5. Next chunk starting point determination[判定/决定] # 判定是否开始了下一个情节点 [有事几个章节才是一个完整情节]
     """
     logger.info(f"Extracting plots from chunk for book: {book['title']}")
+    print("本章节的原始内容是:")
+    print(chunk)
+    print("****"*8)
 
     # Create deep copy of truncated plots and remove text field to avoid redundancy
     import copy
-    if truncated_plots:
+    if truncated_plots:  # 先前的情节(还没结束)
         truncated_plots = copy.deepcopy(truncated_plots)
         for plot in truncated_plots:
             plot.pop('text')
@@ -525,7 +458,12 @@ Please provide the output in the following JSON format:
     from utils import get_response_json, extract_json
 
     # Get and parse LLM response
-    response = get_response_json([extract_json, parse_response], model=args.model, messages=[{"role": "user", "content": prompt}], book=book, chunk=chunk, fix_truncated_json=True)
+    response = get_response_json(
+            [extract_json,  # 从结果中提取json
+             parse_response], 
+            model=args.model, 
+            messages=[{"role": "user", "content": prompt}], 
+            book=book, chunk=chunk, fix_truncated_json=True)
 
     return response
 
@@ -564,8 +502,7 @@ def extract(book, chunk_size=8192):  # 从book中提取信息
 
     # 对book进行chunk切分[按照章节/chunk-size] # 基于规则
     chunk_generator = create_chunk_generator(book, chunk_size)
-    print("本书chunk切分完毕，一共{a}个chunk".format(a=len(chunk_generator)))
-    1111/0
+    print("本书chunk切分完毕，一共{a}个chunk-章节".format(a=len(chunk_generator)))
     # Initialize results structure
     results = {
         'chapter_beginnings': [],
@@ -576,30 +513,25 @@ def extract(book, chunk_size=8192):  # 从book中提取信息
     remaining_chunk = ''  # Text carried over from previous chunk
     truncated_plots = []  # Plots that continue into next chunk
     
-    # 逐个chunk进行处理
+    # 逐个chunk(chapter)进行处理
     for i, chunk in enumerate(chunk_generator):
         
-        print(f"当前处理本书的 第{i}号chunk  with {len(encode(chunk))} tokens")
-
+        print("当前处理本书的 第{i}号chunk  with {a} tokens".format(i=i, a=chunk["chapter_tokens"]))
         # Extract information from current chunk
-        response = extract_from_chunk(book, i, remaining_chunk + chunk, truncated_plots)
+        response = extract_from_chunk(book, i, remaining_chunk + "".join(chunk["chapter_contents"]), truncated_plots)
+        print(response)
         print("这个chunk处理完毕")
         fail_to_parse_responses = []
 
         # Handle the response
-        if response:
-            if isinstance(response, tuple) and len(response) == 3:
-                # Successful extraction
-                chapter_beginnings, plots, remaining_chunk = response 
-            else:
-                # Failed extraction
-                chapter_beginnings, plots, remaining_chunk = [], [], ''
-                fail_to_parse_responses.append(response['fail_to_parse_response'])
-        else:
-            # No response
+        if isinstance(response, tuple) and len(response) == 3:  # 解析成功
+            chapter_beginnings, plots, remaining_chunk = response 
+        else:  # 解析失败
             chapter_beginnings, plots, remaining_chunk = [], [], ''
+            fail_to_parse_responses.append(response['fail_to_parse_response'])
 
-        # Merge truncated plots from previous chunk with current plots
+
+        # 合并 truncated plots from previous chunk with current plots
         for u_plot in truncated_plots:
             # Find matching plot in current chunk (by summary similarity)
             idx = find_best_match_passage([p['summary'] for p in plots], u_plot['summary'])
@@ -640,6 +572,8 @@ def extract(book, chunk_size=8192):  # 从book中提取信息
         results['chapter_beginnings'].extend(chapter_beginnings)
         results['plots'].extend(finished_plots)
 
+    print("所有{a}个chunk处理完毕".format(a=len(chunk_generator)))
+    
     # Finish any remaining truncated plots
     for u_plot in truncated_plots:
         u_plot['state'] = 'finished'
@@ -647,10 +581,12 @@ def extract(book, chunk_size=8192):  # 从book中提取信息
     
     results['fail_to_parse_responses'] = fail_to_parse_responses
     
-    # Save results
-    with open(save_path, 'w', encoding='utf-8') as f:
-        json.dump(results, f, ensure_ascii=False, indent=2)
+    # # Save results
+    # with open(save_path, 'w', encoding='utf-8') as f:
+    #     json.dump(results, f, ensure_ascii=False, indent=2)
 
+    print(results)
+    1/0
     return results
 
 count_nth_generation = {i: 0 for i in range(7)}
