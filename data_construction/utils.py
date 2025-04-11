@@ -497,6 +497,7 @@ def print_conversation_to_file(conversation_data: Dict, file_path: str):
     return 
 
 
+#### 从LLM的结果中 提取 目标结果json
 def extract_json(text, **kwargs):
     def _fix_json(json_response):
         
@@ -614,7 +615,7 @@ def get_response_json(post_processing_funcs=[extract_json], **kwargs):
     secondary_response = None  # Store backup response for parsing failures
 
     while True:
-        logger.info(f'第{nth_generation}次 生成[出错重试]')
+        logger.info(f'第{nth_generation}次 请求LLM生成[ 多次是为了 出错重试]')
         response = get_response(**kwargs, nth_generation=nth_generation)
         # logger.info(f'response by LLM: {response}')
         if response is None:
@@ -637,13 +638,13 @@ def get_response_json(post_processing_funcs=[extract_json], **kwargs):
 
         # 逐个运行 后处理函数 操作 response
         for i, post_processing_func in enumerate(post_processing_funcs):
-            print("当前调用的函数名称是：{a} ".format(a=post_processing_func.__name__))
             if response is None:
                 break
             
-            prev_response = response
             response = post_processing_func(response, **kwargs)
-
+            print("+++###"*3)
+            print("当前调用的函数名称是：{a} ".format(a=post_processing_func.__name__))
+            print(response)
             # 如果parse_response函数，处理response失败，进行重试
             # if post_processing_func.__name__ == 'parse_response' and response == False:
             #     orig_response = get_response(**kwargs, nth_generation=nth_generation)
@@ -657,10 +658,8 @@ def get_response_json(post_processing_funcs=[extract_json], **kwargs):
 
             #     logger.info(f'orig_response: {orig_response}\nNum Tokens: {num_tokens_from_string(orig_response)}')
 
-        json_response = response
-
         
-        if json_response: # 响应解析正常
+        if response: # 响应解析正常
             break
         else:  # 如果响应解析失效，则继续重试，最多5次
             nth_generation += 1
@@ -669,7 +668,7 @@ def get_response_json(post_processing_funcs=[extract_json], **kwargs):
                 if 'parse_response' in [f.__name__ for f in post_processing_funcs]:
                     return {"fail_to_parse_response": secondary_response}
     
-    return json_response
+    return response
 
 def print_json(data):
     logger.info(json.dumps(data, ensure_ascii=False, indent=2))

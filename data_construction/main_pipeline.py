@@ -1197,38 +1197,39 @@ Now, please generate the character profile, starting with ===Profile===.
         json.dump(results, f, ensure_ascii=False, indent=2)
 
 
+def all_in_one(book):
+    """all_in_one 具体提取一本book"""
+    try:
+        extract(book)
+        #restore_from_cache(book)  # 缓存重试机制， 可以先屏蔽掉，降低复杂度
+        result = assemble(book)
+        logger.info(f"Successfully processed book: {book.get('title', 'Unknown')}")
+        return result
+    except Exception as e:
+        logger.error(f"Error processing book {book.get('title', 'Unknown')}: {str(e)}")
+        logger.error(traceback.format_exc())
+        return None
+
 
 if __name__ == '__main__':
 
     # Create output directory if it doesn't exist
     os.makedirs(args.output_dir, exist_ok=True)
 
-    # Read input data
+    # 读取输入books
     books_data = []
-    
     with open(args.input, 'r', encoding='utf-8') as file:
         data = json.load(file)  # 使用 json.load() 读取文件内容并解析为 Python 对象
         books_data.append(data)
 
-    # Clean book titles
+    # 清理book的标题（一般英文书，需要处理）
     for book in books_data:
         # 有这些key: title, author , content, 
         book['title'] = book['title'].replace('/', '-').replace(':', '_').replace('.', ' ')
 
     logger.info(f"一共要处理{len(books_data)}本书")
 
-    def process_book(book):
-        """具体提取一本book"""
-        try:
-            extract(book)
-            #restore_from_cache(book)  # 缓存重试机制， 可以先屏蔽掉，降低复杂度
-            result = assemble(book)
-            logger.info(f"Successfully processed book: {book.get('title', 'Unknown')}")
-            return result
-        except Exception as e:
-            logger.error(f"Error processing book {book.get('title', 'Unknown')}: {str(e)}")
-            logger.error(traceback.format_exc())
-            return None
+
 
     if args.num_workers > 1:
         from concurrent.futures import ProcessPoolExecutor
@@ -1238,7 +1239,7 @@ if __name__ == '__main__':
         # Process books in parallel
         with ProcessPoolExecutor(max_workers=args.num_workers) as executor:
             processed_books = list(tqdm(
-                executor.map(process_book, books_data),
+                executor.map(all_in_one, books_data),
                 total=len(books_data),
                 desc="Processing books"
             ))
@@ -1246,7 +1247,7 @@ if __name__ == '__main__':
         processed_books = []
         for book in tqdm(books_data):
             # 处理一本书的流程
-            processed_book = process_book(book)
+            processed_book = all_in_one(book)
             processed_books.append(processed_book)
 
 
